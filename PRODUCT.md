@@ -63,6 +63,15 @@ OUTPUT           ranked findings · traced paths · CLI / JSON / web
 | 5. Triage | ~60 | ~20 with verdicts | LLM with graph context; structured JSON output only. |
 | 6. Rank | verdicts | ranked report | reachability class × confidence × blast radius. |
 
+### Where the LLM sits (and where it must not)
+
+**The LLM never sees the raw findings.** It runs *last*, only on the findings that reachability has already kept (~20 of ~200), each wrapped in graph context (flagged code + its callers + module summary). Two layers sit on top of detection, in strict order:
+
+1. **Reachability — deterministic, no LLM.** Cuts ~200 → ~20 by tracing whether untrusted input can reach the flagged code. Reproducible and cheap. This is the core contribution.
+2. **LLM triage — on the survivors only.** A verdict (real / false-positive / needs-review) plus reasoning, as structured JSON, cached and budget-capped.
+
+Handing raw scanner output straight to the LLM is the anti-pattern we reject: expensive, slow, and it rates noise as confidently as signal. And triage must **earn its slot** — if it doesn't beat reachability-alone on the eval harness, ship it disabled (§10). The reference tools (Arcflow/CodeClean) have neither layer: their detection is pure regex, reported flat. Both layers here are Ravel's contribution.
+
 ---
 
 ## 4. Data model
@@ -254,9 +263,13 @@ The eval harness is owned by someone who is *not* building triage.
 
 ---
 
-## 13. Reference projects (Veloce-AI, owner-approved to borrow from)
+## 13. Reference projects (Veloce-AI, owner-approved to reuse)
 
-Two related, owner-approved codebases we can study for logic and patterns. **Both are browser-based, multi-language JavaScript analyzers.** Ravel is architecturally different (Python-only, server-side, real scanners, reachability-driven triage), so we borrow *approaches*, not code.
+Two related, owner-approved codebases. **We have full source access and reuse their code directly** — porting the useful logic into Ravel's Python/server-side stack, not just studying patterns. **Both are browser-based, multi-language JavaScript analyzers**, so "reuse" means **porting JS → Python**, and it is *one-directional*: we lift the tedious, correct-enough domain knowledge (framework route patterns, dependency-file parsing, OSV plumbing, secret taxonomies, framework entry-point exclusion lists) and rebuild the two load-bearing parts — **call-graph resolution** and **detection** — the Ravel way. Carrying their regex detector or their name-heuristic call graph directly would import the exact false-positive noise Ravel exists to kill.
+
+> Both repos are vendored (read-only, gitignored) at [`reference/`](../reference/). A full component-by-component reuse map — what to **port**, **reference**, or **drop** — lives at [`docs/reference/veloce-reuse-map.md`](reference/veloce-reuse-map.md). Read that before porting anything.
+>
+> **Note:** CodeClean reuses Arcflow's parser (its own `parser-*.js` are stubs), so Arcflow is the primary engine. Arcflow already uses tree-sitter for Python call detection — the same grammar family Ravel plans on.
 
 ### Arcflow — `github.com/Veloce-AI/Arcflow`
 Browser-based VAPT / architecture-intelligence platform. Zero-install, offline-first, code never leaves the browser.
