@@ -229,25 +229,38 @@ parse → graph → entry points → scanners → eval harness
 
 ---
 
-## 11. Proposed repository layout
+## 11. Repository layout
+
+Flat `ravel/` package (**not** `src/ravel/` — a flat layout installs reliably
+with uv/hatchling; the `src` variant produced flaky editable installs here).
+Subpackages that are scaffolded but not yet implemented are tagged with the phase
+they arrive in.
 
 ```
-/src
-  /ingest       clone, language detect, tree-sitter parsing
-  /graph        node/edge construction, resolution, entry points
-  /scanners     wrappers + normalization to Finding schema
-  /triage       reachability, context assembly, LLM verdict, ranking
-  /summarize    bottom-up summaries, hash-based caching
-  /deps         deprecated API + outdated dependency analysis
-  /store        Postgres models, migrations
-  /cli          entry point
-/web            Next.js frontend
-/eval
-  /repos        benchmark repo pins (commit SHAs)
-  /truth        ground-truth vulnerability files
-  run.py        reproducible from one command
-/docs
+ravel/                package root  (import ravel)
+  __main__.py         `python -m ravel …`  (deterministic CLI entry)
+  models.py           Node / Edge / EntryPoint / ExternalRef / Finding
+  core/               hashing, structured logging, config
+  ingest/             repo load + tree-sitter file discovery
+  graph/              node/edge construction, resolution, entry points
+  cli/                Typer CLI (`ravel index …`)
+  scanners/           scanner wrappers + normalization              [Phase 2]
+  triage/             reachability, context assembly, verdict, rank  [Phase 3–4]
+  summarize/          bottom-up summaries, hash-based caching        [Phase 4]
+  deps/               deprecated-API + outdated-dependency analysis  [Phase 5]
+  store/              Postgres + pgvector models, migrations         [later]
+tests/                pytest suite (real fixtures, not synthetic strings)
+eval/
+  fixtures/           sample apps used as parse/graph fixtures
+  repos/              benchmark repo pins (commit SHAs)              [Phase 2]
+  truth/              ground-truth vulnerability files               [Phase 2]
+  run.py              reproducible from one command                  [Phase 2]
+web/                  Next.js frontend                               [Phase 5]
+docs/                 ROADMAP, BUILD-PLAN, reference/ (reuse map)
 ```
+
+Root files: `pyproject.toml` (uv), `uv.lock`, `AGENTS.md`, `CLAUDE.md`,
+`PRODUCT.md`, `README.md`, `.gitignore`.
 
 ---
 
