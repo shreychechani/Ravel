@@ -40,6 +40,13 @@ pnpm-debug.log*
 /cache/
 *.log
 
+# ---- Reference codebases (Veloce-AI Arcflow/CodeClean — read-only, not part of build) ----
+/reference/
+
+# ---- Local scratch (browser automation artifacts, ad-hoc screenshots) ----
+.playwright-mcp/
+/arcflow-home.png
+
 # ---- Editor / OS ----
 .DS_Store
 .idea/
