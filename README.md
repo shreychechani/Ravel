@@ -32,16 +32,23 @@ The graph is the asset; everything else is an application of it.
 
 ## How it works
 
-```
-git clone → tree-sitter parse → code graph (nodes + edges + entry points)
-    ├── security pipeline:  Semgrep · Bandit · gitleaks · OSV  → normalized findings
-    └── triage engine:
-            1. reachability   (deterministic, no LLM)   ← core contribution
-            2. context assembly from the graph
-            3. LLM verdict    (structured output)
-            4. rank           (exploitability × blast radius)
-                                   ↓
-                    ranked findings · traced paths · CLI / JSON / web
+```mermaid
+flowchart TD
+    A[git clone] --> B[tree-sitter parse]
+    B --> C[Code graph<br/>nodes · edges · entry points]
+    C --> D[Security scanners<br/>Semgrep · Bandit · gitleaks · OSV]
+    D --> E[~200 normalized findings]
+    E --> F{Reachable from<br/>untrusted input?<br/>deterministic · no LLM}
+    C -. graph context .-> F
+    F -->|yes| G[~20 findings that matter]
+    F -->|no| X[set aside<br/>unreachable / dead / sanitized]
+    G --> H[Context assembly from graph]
+    H --> I[LLM verdict<br/>structured JSON]
+    I --> J[Rank<br/>exploitability × blast radius]
+    J --> K[Ranked findings · traced paths<br/>CLI / JSON / web]
+
+    style F fill:#6366f1,color:#ffffff
+    style G fill:#22c55e,color:#ffffff
 ```
 
 The **reachability filter is deterministic and LLM-free** — it's the core of the product. The LLM only adds a verdict on top of an already-filtered set, with graph context, and its output is structured JSON.
@@ -103,4 +110,8 @@ The **reachability filter is deterministic and LLM-free** — it's the core of t
 
 ## Documentation
 
-See [`PRODUCT.md`](./PRODUCT.md) for the full product and implementation reference — data model, success metrics, incremental-update logic, and build order.
+- **[`docs/ROADMAP.md`](./docs/ROADMAP.md)** — plain-English, step-by-step tour of what we're building (start here).
+- **[`PRODUCT.md`](./PRODUCT.md)** — the source of truth: data model, success metrics, non-negotiables, incremental-update logic, build order.
+- **[`docs/BUILD-PLAN.md`](./docs/BUILD-PLAN.md)** — the phased, checkpoint-gated technical plan.
+- **[`docs/reference/veloce-reuse-map.md`](./docs/reference/veloce-reuse-map.md)** — what we port / reference / drop from the Arcflow & CodeClean reference codebases.
+- **[`AGENTS.md`](./AGENTS.md)** — tool-agnostic rules for AI coding agents contributing to Ravel.
