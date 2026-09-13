@@ -39,12 +39,21 @@ def _row(point: Any) -> int:
     return int(point.row) if hasattr(point, "row") else int(point[0])
 
 
+def parse_to_tree(source: SourceFile) -> tuple[Any, bytes]:
+    """Parse ``source`` and return ``(root_node, utf8_bytes)``.
+
+    Shared by node extraction (below) and call-site discovery in
+    :mod:`ravel.graph.resolve`, so both see the identical tree.
+    """
+    data = source.content.encode("utf-8")
+    return _PARSER.parse(data).root_node, data
+
+
 def parse_file(source: SourceFile) -> list[Node]:
     """Extract every function and class definition from a source file."""
-    data = source.content.encode("utf-8")
-    tree = _PARSER.parse(data)
+    root, data = parse_to_tree(source)
     out: list[Node] = []
-    _walk(tree.root_node, data, source, [], out)
+    _walk(root, data, source, [], out)
     return out
 
 

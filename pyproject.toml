@@ -46,6 +46,11 @@ python_version = "3.12"
 strict = true
 files = ["ravel", "tests"]
 
+# jedi ships no py.typed marker; networkx stubs are third-party and partial.
+[[tool.mypy.overrides]]
+module = ["jedi.*", "networkx.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

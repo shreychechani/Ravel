@@ -16,9 +16,9 @@ from rich.console import Console
 from rich.table import Table
 
 from ravel.core.logging import configure_logging, get_logger
-from ravel.graph.parse import PROVENANCE, parse_file
-from ravel.ingest.loader import discover
-from ravel.models import Node, NodeKind
+from ravel.graph.parse import PROVENANCE
+from ravel.graph.resolve import build_graph
+from ravel.models import EdgeKind, NodeKind
 
 app = typer.Typer(add_completion=False, help="Ravel — reachability-aware security triage.")
 console = Console()
@@ -47,34 +47,53 @@ def index(
         typer.Option("--json", help="Write the extracted nodes to this JSON file."),
     ] = None,
 ) -> None:
-    """Index a Python repo: read files and extract function/class nodes."""
+    """Index a Python repo: build the call graph and report coverage."""
     configure_logging()
 
-    files = discover(path)
-    nodes: list[Node] = []
-    for source in files:
-        nodes.extend(parse_file(source))
+    result = build_graph(path)
+    nodes = result.nodes
+    cov = result.coverage
 
     functions = sum(1 for n in nodes if n.kind is NodeKind.FUNCTION)
     classes = sum(1 for n in nodes if n.kind is NodeKind.CLASS)
-    loc = sum(f.lines for f in files)
+    files = sum(1 for n in nodes if n.kind is NodeKind.FILE)
+    call_edges = sum(1 for e in result.edges if e.kind is EdgeKind.CALLS and e.resolved)
+
+    # Coverage is the Phase 1 gate: ≥80% of call sites resolved (BUILD-PLAN §1).
+    cov_pct = cov.ratio * 100
+    cov_style = "green" if cov.ratio >= 0.80 else "yellow"
 
     table = Table(title=f"Ravel index — {path}")
     table.add_column("metric", style="cyan")
     table.add_column("value", justify="right", style="green")
-    table.add_row("Python files", str(len(files)))
-    table.add_row("Lines of code", str(loc))
-    table.add_row("Nodes (functions + classes)", str(len(nodes)))
+    table.add_row("Python files", str(files))
     table.add_row("Functions", str(functions))
     table.add_row("Classes", str(classes))
+    table.add_row("Call edges (resolved)", str(call_edges))
+    table.add_row("External refs", str(len(result.external_refs)))
+    table.add_row("Call sites", str(cov.total))
+    table.add_row("  ├─ resolved (internal)", str(cov.internal))
+    table.add_row("  ├─ resolved (external)", str(cov.external))
+    table.add_row("  └─ unresolved", str(cov.unresolved))
+    table.add_row("Resolution coverage", f"[{cov_style}]{cov_pct:.1f}%[/{cov_style}]")
     table.add_row("Parser", PROVENANCE)
     console.print(table)
 
     if json_out is not None:
-        json_out.write_text(
-            json.dumps([n.model_dump() for n in nodes], indent=2), encoding="utf-8"
-        )
-        log.info("Wrote %d nodes to %s", len(nodes), json_out)
+        payload = {
+            "nodes": [n.model_dump() for n in nodes],
+            "edges": [e.model_dump() for e in result.edges],
+            "external_refs": [r.model_dump() for r in result.external_refs],
+            "coverage": {
+                "total": cov.total,
+                "internal": cov.internal,
+                "external": cov.external,
+                "unresolved": cov.unresolved,
+                "ratio": cov.ratio,
+            },
+        }
+        json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        log.info("Wrote graph (%d nodes, %d edges) to %s", len(nodes), len(result.edges), json_out)
 
 
 def run() -> None:
