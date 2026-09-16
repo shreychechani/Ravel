@@ -71,6 +71,7 @@ def index(
     table.add_row("Classes", str(classes))
     table.add_row("Call edges (resolved)", str(call_edges))
     table.add_row("External refs", str(len(result.external_refs)))
+    table.add_row("Entry points (untrusted)", str(len(result.entry_points)))
     table.add_row("Call sites", str(cov.total))
     table.add_row("  ├─ resolved (internal)", str(cov.internal))
     table.add_row("  ├─ resolved (external)", str(cov.external))
@@ -79,11 +80,27 @@ def index(
     table.add_row("Parser", PROVENANCE)
     console.print(table)
 
+    if result.entry_points:
+        by_id = {n.id: n for n in nodes}
+        ep_table = Table(title="Entry points (reachability sources)")
+        ep_table.add_column("handler", style="cyan")
+        ep_table.add_column("kind")
+        ep_table.add_column("trust", style="yellow")
+        for ep in result.entry_points:
+            handler = by_id[ep.node_id]
+            ep_table.add_row(
+                f"{handler.qualified_name}  [dim]({handler.file_path}:{handler.start_line})[/dim]",
+                ep.kind.value,
+                ep.trust.value,
+            )
+        console.print(ep_table)
+
     if json_out is not None:
         payload = {
             "nodes": [n.model_dump() for n in nodes],
             "edges": [e.model_dump() for e in result.edges],
             "external_refs": [r.model_dump() for r in result.external_refs],
+            "entry_points": [ep.model_dump() for ep in result.entry_points],
             "coverage": {
                 "total": cov.total,
                 "internal": cov.internal,

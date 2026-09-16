@@ -25,9 +25,10 @@ import jedi
 import networkx as nx
 
 from ravel.core.logging import get_logger
+from ravel.graph.entrypoints import detect_entrypoints
 from ravel.graph.parse import parse_file, parse_to_tree
 from ravel.ingest.loader import SourceFile, discover
-from ravel.models import Edge, EdgeKind, ExternalRef, Node, NodeKind
+from ravel.models import Edge, EdgeKind, EntryPoint, ExternalRef, Node, NodeKind
 
 log = get_logger("ravel.graph.resolve")
 
@@ -69,6 +70,7 @@ class GraphResult:
     nodes: list[Node]
     edges: list[Edge]
     external_refs: list[ExternalRef] = field(default_factory=list)
+    entry_points: list[EntryPoint] = field(default_factory=list)
     coverage: Coverage = field(default_factory=Coverage)
 
 
@@ -188,6 +190,10 @@ def build_graph(root: Path | str) -> GraphResult:
             nodes.append(node)
             nodes_by_file[source.rel_path].append(node)
 
+    entry_points: list[EntryPoint] = []
+    for source in files:
+        entry_points.extend(detect_entrypoints(source, nodes_by_file[source.rel_path]))
+
     project = jedi.Project(str(root))
     edges: list[Edge] = []
     external_refs: list[ExternalRef] = []
@@ -252,10 +258,11 @@ def build_graph(root: Path | str) -> GraphResult:
         graph.add_edge(edge.src_id, edge.dst_id, kind=edge.kind.value, resolved=edge.resolved)
 
     log.info(
-        "graph: %d nodes, %d edges (%d resolved), coverage %.1f%%",
+        "graph: %d nodes, %d edges (%d resolved), %d entry points, coverage %.1f%%",
         len(nodes),
         len(edges),
         cov.internal,
+        len(entry_points),
         cov.ratio * 100,
     )
     return GraphResult(
@@ -263,6 +270,7 @@ def build_graph(root: Path | str) -> GraphResult:
         nodes=nodes,
         edges=edges,
         external_refs=external_refs,
+        entry_points=entry_points,
         coverage=cov,
     )
 
