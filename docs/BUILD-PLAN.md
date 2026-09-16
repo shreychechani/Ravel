@@ -18,20 +18,37 @@ Python**, we do not import or run it. See the reuse map before porting anything.
 
 ---
 
+## Status (2026-09-16)
+
+Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
+
+| Phase | State | One-line |
+|---|---|---|
+| 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
+| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` edges + coverage + FastAPI/Flask entry points done; import/inherit/defines edges (grimp), Django routes, and the correctness checkpoint remain |
+| 2 — Scanners + eval | ⬜ | not started |
+| 3 — Reachability | ⬜ | not started (the core contribution) |
+| 4 — Triage + ranking | ⬜ | not started |
+| 5 — Interface + deps + incremental | ⬜ | not started |
+
+Per-phase markers below carry the detail.
+
+---
+
 ## Phase 0 — Foundation (rails before features)
 
 **Goal:** a repo you can build in, with the data model + fixtures locked so
 nothing needs re-indexing later.
 
-- Scaffold the §11 layout (`src/{ingest,graph,scanners,triage,summarize,deps,store,cli}`, `web/`, `eval/`, `docs/`).
-- Tooling: `uv` (or poetry), `ruff` + `mypy` (type hints everywhere), `pytest`. Structured logging, no `print()`.
-- Data model as code: SQLAlchemy + Alembic for `Node / Edge / EntryPoint / ExternalRef / Finding` on Postgres + pgvector. **Add the post-v1 nullable columns now** (`runtime_evidence`, `graph_diff`, `patch`) so we never migrate — but build no logic for them (§4).
-- Content-hash utility — the cache-key primitive for the whole system.
-- LLM abstraction (interface only): swappable provider (Ollama / BYO key), hard token budget + kill switch. Default to latest Claude (small model for summaries, Opus-class for triage). Wire later.
-- Fixtures: pin by SHA a few small Flask/FastAPI/Django apps + the CVE-patched OSS repos for eval.
+- ✅ Scaffold the §11 layout (flat `ravel/{ingest,graph,scanners,triage,summarize,deps,store,cli}`, `web/`, `eval/`, `docs/`).
+- ✅ Tooling: `uv`, `ruff` + `mypy` (type hints everywhere), `pytest`. Structured logging, no `print()`.
+- 🚧 Data model as code. **Done:** the domain model exists as Pydantic (`ravel/models.py`) — `Node / Edge / EntryPoint / ExternalRef / Finding` incl. the post-v1 nullable fields (`runtime_evidence`, `graph_diff`, `patch`), no logic on them (§4). **Not yet:** SQLAlchemy + Alembic + Postgres/pgvector persistence — `ravel/store/` is still a stub.
+- ✅ Content-hash utility (`ravel/core/hashing.py`) — the cache-key primitive.
+- ⬜ LLM abstraction (interface only): swappable provider (Ollama / BYO key), token budget + kill switch. `triage/` `summarize/` are stubs.
+- 🚧 Fixtures: FastAPI + Flask sample apps in `eval/fixtures/`. **Not yet:** a Django app, and SHA-pinned CVE-patched OSS repos for eval.
 
 **Port / reference:** none yet.
-**Exit:** `ravel index <fixture>` runs, emits valid (empty) graph rows; CI green.
+**Exit (🚧):** `ravel index <fixture>` runs and emits valid graph rows ✅; CI green ⬜ (no `.github/workflows` yet).
 
 ---
 
@@ -40,23 +57,23 @@ nothing needs re-indexing later.
 **Goal:** parse → resolve → graph → entry points, on **one** fixture, done right.
 This is where Ravel beats Arcflow.
 
-- Ingest: GitPython clone → tree-sitter parse Python → function/class `Node`s with `source_hash`, docstring.
-- Resolution (the quality bar): Jedi + `ast` for scope-accurate call resolution; `grimp` for the import graph. Replaces Arcflow's name+import heuristic — the biggest accuracy gap in their engine.
-- Edges in NetworkX: `calls / imports / inherits / defines`. **Unresolved edges → `resolved=False`, marked `unknown`, never dropped** (§6).
-- ExternalRef from imports (package/version/symbol) — must exist from day one.
-- Coverage metric: emit "% of call sites resolved" (§6).
+- 🚧 Ingest: tree-sitter parse Python → function/class `Node`s with `source_hash`, docstring ✅. GitPython clone of remote repos ⬜ (local paths only so far).
+- 🚧 Resolution (the quality bar): Jedi + `ast` for scope-accurate call resolution ✅ (`ravel/graph/resolve.py`). `grimp` import graph ⬜.
+- 🚧 Edges in NetworkX: `calls` ✅ with **unresolved → `resolved=False`, marked `unknown`, never dropped** ✅ (§6). `imports / inherits / defines` ⬜.
+- 🚧 ExternalRef from imports ✅ (package + symbol from call resolution); `version` field ⬜ (not populated yet).
+- ✅ Coverage metric: "% of call sites resolved" emitted in the CLI (§6).
 
 **Port from reference:**
-- `reference/Arcflow/js/analysis/parser-routes.js` → Python entry-point detection (Flask/FastAPI/Django `@app.route`, `@router.*`, `urlpatterns`). Its `authProtected` middleware regex → `trust` hint.
-- Entry-point / dead-code **exclusion lists** in `reference/Arcflow/js/analysis/graph-builder.js` (`main`, `create_app`, `on_startup`, migration `upgrade`/`downgrade`, `test_*`, dunders) → so we don't mislabel real entry points.
-- `getParserProvenance` in `reference/Arcflow/js/analysis/parser-core.js` → the "coverage as a visible metric" idea (tree-sitter vs fallback per file).
+- 🚧 `reference/Arcflow/js/analysis/parser-routes.js` → Python entry-point detection. **FastAPI/Flask `@app.get`/`@router.*`/`@app.route(..., methods=[...])` done** (`ravel/graph/entrypoints.py`, tree-sitter AST). **Django `urlpatterns` ⬜** (needs cross-module view resolution). `authProtected` regex **deliberately not ported** → all HTTP routes stay `untrusted`; auth ≠ trusted input (§6).
+- ⬜ Entry-point / dead-code **exclusion lists** in `graph-builder.js` (`main`, `create_app`, `on_startup`, migration `upgrade`/`downgrade`, `test_*`, dunders) — not needed until CLI/script entry detection or dead-code lands.
+- ✅ `getParserProvenance` idea → parser provenance surfaced (`PROVENANCE`, coverage metric).
 - **Reference only (do not port as-is):** `parser-callgraph.js`, `graph-builder.js` call-linking — heuristic; we resolve properly instead.
 
-**🚩 Checkpoint (§10):** call graph correct on **~20 hand-checked cases**, coverage **≥80%**. If not — stop everything and fix. All downstream value depends on graph quality.
+**🚩 Checkpoint (§10) — ⬜ NOT YET RUN:** call graph correct on **~20 hand-checked cases**, coverage **≥80%**. If not — stop everything and fix. All downstream value depends on graph quality. (Current: exact on the FastAPI/Flask fixtures, but no real benchmark repo hand-checked yet; FastAPI fixture coverage is 76.9%.)
 
 ---
 
-## Phase 2 — Scanners + eval harness (parallel, *different owner*)
+## Phase 2 — Scanners + eval harness (parallel, *different owner*) — ⬜ not started
 
 **Goal:** real findings, normalized and mapped to nodes; a scoreboard we trust.
 
@@ -71,7 +88,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 3 — Reachability (the core contribution)
+## Phase 3 — Reachability (the core contribution) — ⬜ not started
 
 **Goal:** filter findings by whether untrusted input can reach them.
 **Deterministic, no LLM.**
@@ -85,7 +102,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 4 — Triage + ranking (LLM, only if Phase 3 passes)
+## Phase 4 — Triage + ranking (LLM, only if Phase 3 passes) — ⬜ not started
 
 - Context assembly from the graph (flagged code + callers + module summary). Bottom-up summaries, hash-cached.
 - Verdict: structured JSON only, cached, budget-capped. **Cache key = hash of the *assembled context*, not the node** (§8 trap).
@@ -97,7 +114,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 5 — Interface + deps + incremental
+## Phase 5 — Interface + deps + incremental — ⬜ not started
 
 - Output: CLI + JSON, then single-page web view (Next.js + react-flow + **dagre**, not d3-force) showing traced paths.
 - Deps report: deprecated-API + outdated-dependency, classified by reachability (reuses Phase 2 OSV work).
