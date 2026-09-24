@@ -25,7 +25,7 @@ Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 | Phase | State | One-line |
 |---|---|---|
 | 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
-| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` edges + coverage + FastAPI/Flask entry points done; import/inherit/defines edges (grimp), Django routes, and the correctness checkpoint remain |
+| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` + `defines` edges + coverage + FastAPI/Flask entry points done; import/inherit edges (grimp), Django routes, and the correctness checkpoint remain |
 | 2 — Scanners + eval | ⬜ | not started |
 | 3 — Reachability | ⬜ | not started (the core contribution) |
 | 4 — Triage + ranking | ⬜ | not started |
@@ -59,7 +59,7 @@ This is where Ravel beats Arcflow.
 
 - 🚧 Ingest: tree-sitter parse Python → function/class `Node`s with `source_hash`, docstring ✅. GitPython clone of remote repos ⬜ (local paths only so far).
 - 🚧 Resolution (the quality bar): Jedi + `ast` for scope-accurate call resolution ✅ (`ravel/graph/resolve.py`). `grimp` import graph ⬜.
-- 🚧 Edges in NetworkX: `calls` ✅ with **unresolved → `resolved=False`, marked `unknown`, never dropped** ✅ (§6). `imports / inherits / defines` ⬜.
+- 🚧 Edges in NetworkX (`MultiDiGraph`, keyed by kind): `calls` ✅ with **unresolved → `resolved=False`, marked `unknown`, never dropped** ✅ (§6). `defines` ✅ (file → def, class → method, def → nested def). `imports / inherits` ⬜.
 - 🚧 ExternalRef from imports ✅ (package + symbol from call resolution); `version` field ⬜ (not populated yet).
 - ✅ Coverage metric: "% of call sites resolved" emitted in the CLI (§6).
 

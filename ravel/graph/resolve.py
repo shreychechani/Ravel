@@ -10,6 +10,9 @@ function/class (→ a ``calls`` edge), or a third-party / stdlib symbol
 it becomes a ``calls`` edge to a ``unknown::<name>`` target with
 ``resolved=False`` (PRODUCT.md §6). Coverage = resolved / total call sites.
 
+Structural ``defines`` edges (file → top-level def, class → method, function →
+nested def) come straight from the parse tree and are always resolved.
+
 Note: tree-sitter columns are byte offsets, Jedi columns are character
 offsets — identical for ASCII source; a known v1 caveat for non-ASCII.
 """
@@ -66,7 +69,7 @@ class Coverage:
 class GraphResult:
     """The built call graph plus everything the CLI and later phases consume."""
 
-    graph: nx.DiGraph
+    graph: nx.MultiDiGraph  # keyed by edge kind: a pair can both call and define
     nodes: list[Node]
     edges: list[Edge]
     external_refs: list[ExternalRef] = field(default_factory=list)
@@ -195,7 +198,11 @@ def build_graph(root: Path | str) -> GraphResult:
         entry_points.extend(detect_entrypoints(source, nodes_by_file[source.rel_path]))
 
     project = jedi.Project(str(root))
-    edges: list[Edge] = []
+    edges: list[Edge] = [
+        edge
+        for rel, local in nodes_by_file.items()
+        for edge in _defines_edges(local, file_nodes[rel])
+    ]
     external_refs: list[ExternalRef] = []
     cov = Coverage()
 
@@ -251,14 +258,20 @@ def build_graph(root: Path | str) -> GraphResult:
                     ExternalRef(node_id=src_node.id, package=package, symbol=site.name)
                 )
 
-    graph = nx.DiGraph()
+    graph = nx.MultiDiGraph()
     for node in nodes:
         graph.add_node(node.id, kind=node.kind.value, qualified_name=node.qualified_name)
     for edge in edges:
-        graph.add_edge(edge.src_id, edge.dst_id, kind=edge.kind.value, resolved=edge.resolved)
+        graph.add_edge(
+            edge.src_id,
+            edge.dst_id,
+            key=edge.kind.value,
+            kind=edge.kind.value,
+            resolved=edge.resolved,
+        )
 
     log.info(
-        "graph: %d nodes, %d edges (%d resolved), %d entry points, coverage %.1f%%",
+        "graph: %d nodes, %d edges (%d resolved calls), %d entry points, coverage %.1f%%",
         len(nodes),
         len(edges),
         cov.internal,
@@ -273,6 +286,35 @@ def build_graph(root: Path | str) -> GraphResult:
         entry_points=entry_points,
         coverage=cov,
     )
+
+
+def _defines_edges(local: list[Node], file_node: Node) -> list[Edge]:
+    """Structural containment edges for one file: parent → each def it contains.
+
+    The parent is the def whose qualified name is the child's prefix and whose
+    span encloses it (so same-named redefinitions don't cross-link); top-level
+    defs hang off the FILE node.
+    """
+    out: list[Edge] = []
+    for node in local:
+        if node.kind not in _CALLABLE_KINDS:
+            continue
+        parent = file_node
+        if "." in node.qualified_name:
+            parent_qname = node.qualified_name.rsplit(".", 1)[0]
+            parent = next(
+                (
+                    p
+                    for p in local
+                    if p.qualified_name == parent_qname
+                    and p.kind in _CALLABLE_KINDS
+                    and p.start_line <= node.start_line
+                    and node.end_line <= p.end_line
+                ),
+                file_node,
+            )
+        out.append(Edge(src_id=parent.id, dst_id=node.id, kind=EdgeKind.DEFINES))
+    return out
 
 
 def _add_unknown(edges: list[Edge], cov: Coverage, src: Node, name: str) -> None:
