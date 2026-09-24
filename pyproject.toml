@@ -13,7 +13,6 @@ dependencies = [
     "pydantic>=2.7",
     "networkx>=3.3",
     "jedi>=0.19",
-    "grimp>=3.4",
     "gitpython>=3.1",
 ]
 

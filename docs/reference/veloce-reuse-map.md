@@ -69,7 +69,7 @@ patterns/taxonomy, don't port; **Drop** = not relevant to Ravel.
 |---|---|---|---|
 | Python function/class extraction | `parser-extract.js` | **Reference** | Regex+indentation. Ravel uses tree-sitter + `ast`, which is strictly better. Their edge-case handling (decorators, dunder, staticmethod/classmethod, async) is a useful checklist. |
 | Python call detection (tree-sitter CST walk) | `parser-findcalls.js` | **Reference/Port** | Confirms the tree-sitter approach. Ravel goes further with Jedi/`ast` scope resolution. |
-| Import resolution (path-candidate) | `parser-callgraph.js` | **Reference** | Ravel uses `grimp` for the import graph, which is purpose-built. Their multi-lang heuristics aren't needed (Python-only v1). |
+| Import resolution (path-candidate) | `parser-callgraph.js` | **Reference** | Ravel builds the import graph with Python `ast` against its discovered file set (`ravel/graph/imports.py`). Their multi-lang heuristics aren't needed (Python-only v1). |
 | Call-graph assembly / definition linking | `graph-builder.js` | **Reference** | Name+import heuristic — **too imprecise for reachability**. This is exactly the accuracy gap Ravel's Jedi resolution must close. |
 | **API route / entry-point detection** | `parser-routes.js` | **Port** ✅ | Flask/FastAPI/Django decorators + `urlpatterns` — directly Ravel's EntryPoint detection. The `authProtected` middleware heuristic maps onto trust (untrusted vs internal). |
 | **OSV.dev CVE query** | `osv-scan.js`, `dep-scan.js` | **Port/Reference** ✅ | Clean `querybatch` usage + `getUpgradeSuggestion` (extracts fixed version from `affected.ranges.events`). Ravel plans the OSV-Scanner CLI (more robust), but this is a good fallback + the report shape is reusable. |
@@ -97,7 +97,7 @@ tedious, correct-enough domain knowledge** (route patterns, dependency-file
 parsing, OSV plumbing, secret regexes, framework entry-point exclusion lists,
 finding/severity vocabulary, the provenance-as-metric idea) and **rebuild the
 two load-bearing parts — call-graph resolution and detection — the Ravel way**
-(tree-sitter + Jedi/`ast` + grimp for the graph; Semgrep/Bandit/gitleaks/OSV for
+(tree-sitter + Jedi/`ast` for the graph; Semgrep/Bandit/gitleaks/OSV for
 detection). Carrying their detector or their call-graph resolver directly would
 import the exact false-positive problem Ravel is meant to kill.
 

@@ -58,6 +58,8 @@ def index(
     classes = sum(1 for n in nodes if n.kind is NodeKind.CLASS)
     files = sum(1 for n in nodes if n.kind is NodeKind.FILE)
     call_edges = sum(1 for e in result.edges if e.kind is EdgeKind.CALLS and e.resolved)
+    import_edges = sum(1 for e in result.edges if e.kind is EdgeKind.IMPORTS and e.resolved)
+    unknown_imports = sum(1 for e in result.edges if e.kind is EdgeKind.IMPORTS and not e.resolved)
 
     # Coverage is the Phase 1 gate: ≥80% of call sites resolved (BUILD-PLAN §1).
     cov_pct = cov.ratio * 100
@@ -70,6 +72,7 @@ def index(
     table.add_row("Functions", str(functions))
     table.add_row("Classes", str(classes))
     table.add_row("Call edges (resolved)", str(call_edges))
+    table.add_row("Import edges (resolved / unknown)", f"{import_edges} / {unknown_imports}")
     table.add_row("External refs", str(len(result.external_refs)))
     table.add_row("Entry points (untrusted)", str(len(result.entry_points)))
     table.add_row("Call sites", str(cov.total))

@@ -44,7 +44,7 @@ Do not relitigate these in code or review unless a human explicitly reopens them
 
 - **Never edit, run, import, or ship** anything under `reference/`.
 - It is **JavaScript / browser / regex-heuristic**. You **port logic to Python**; you do not translate line-for-line.
-- **Do NOT carry over their two weak parts:** (a) regex/substring security detection (`parser-security.js`) — we use real scanners; (b) name+import heuristic call resolution (`parser-callgraph.js`, `graph-builder.js`) — we resolve with Jedi/`ast`/grimp. Copying these imports the exact false-positive noise Ravel exists to kill.
+- **Do NOT carry over their two weak parts:** (a) regex/substring security detection (`parser-security.js`) — we use real scanners; (b) name+import heuristic call resolution (`parser-callgraph.js`, `graph-builder.js`) — we resolve with Jedi/`ast`. Copying these imports the exact false-positive noise Ravel exists to kill.
 - **Do port** the tedious domain knowledge: framework route patterns, dependency-file parsing, OSV plumbing, secret taxonomies, framework entry-point exclusion lists, the provenance-as-metric idea. See the reuse map for the per-file verdict.
 - When you port something, **cite the source file** in the code comment and PR description, e.g. `# ported from reference/Arcflow/js/analysis/parser-routes.js`.
 

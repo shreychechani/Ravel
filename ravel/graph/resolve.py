@@ -10,6 +10,11 @@ function/class (→ a ``calls`` edge), or a third-party / stdlib symbol
 it becomes a ``calls`` edge to a ``unknown::<name>`` target with
 ``resolved=False`` (PRODUCT.md §6). Coverage = resolved / total call sites.
 
+``imports`` edges (file → file) come from :mod:`ravel.graph.imports`.
+``inherits`` edges (class → base) are resolved the same way; an unresolvable
+base becomes an ``unknown::<name>`` inherits edge. Bases don't count toward
+call coverage — that metric is call sites only.
+
 Structural ``defines`` edges (file → top-level def, class → method, function →
 nested def) come straight from the parse tree and are always resolved.
 
@@ -29,6 +34,7 @@ import networkx as nx
 
 from ravel.core.logging import get_logger
 from ravel.graph.entrypoints import detect_entrypoints
+from ravel.graph.imports import build_import_edges
 from ravel.graph.parse import parse_file, parse_to_tree
 from ravel.ingest.loader import SourceFile, discover
 from ravel.models import Edge, EdgeKind, EntryPoint, ExternalRef, Node, NodeKind
@@ -128,6 +134,49 @@ def _call_sites(source: SourceFile) -> list[CallSite]:
     return out
 
 
+def _base_sites(source: SourceFile) -> list[tuple[int, CallSite]]:
+    """``(class_def_line, base)`` for every base class expression in the file.
+
+    ``Generic[T]`` resolves via its subscripted value; ``metaclass=`` and other
+    keyword arguments are not bases. Anything else (e.g. ``make_base()``) gets
+    ``col=-1`` and becomes an honest ``unknown`` edge.
+    """
+    root, data = parse_to_tree(source)
+    out: list[tuple[int, CallSite]] = []
+
+    def walk(node: Any) -> None:
+        for child in node.named_children:
+            if child.type == "class_definition":
+                class_line = _pt(child.start_point)[0] + 1
+                supers = child.child_by_field_name("superclasses")
+                for base in supers.named_children if supers is not None else []:
+                    if base.type == "keyword_argument":
+                        continue
+                    expr = base.child_by_field_name("value") if base.type == "subscript" else base
+                    info = _callee(expr, data) if expr is not None else None
+                    if info is None:
+                        row, _ = _pt(base.start_point)
+                        out.append((class_line, CallSite(row + 1, -1, _text(base, data)[:60])))
+                    else:
+                        row, col, name = info
+                        out.append((class_line, CallSite(row + 1, col, name)))
+            walk(child)
+
+    walk(root)
+    return out
+
+
+def _goto(script: Any, site: CallSite, rel_path: str) -> list[Any]:
+    """Jedi goto at a call/base site, following imports to the real definition."""
+    try:
+        return list(
+            script.goto(site.line, site.col, follow_imports=True, follow_builtin_imports=True)
+        )
+    except Exception as exc:  # Jedi can raise on pathological positions
+        log.debug("jedi goto failed at %s:%d: %s", rel_path, site.line, exc)
+        return []
+
+
 def _file_node(source: SourceFile) -> Node:
     """A FILE node so module-level call sites (decorators, ``x = f()``) have a home."""
     module = source.rel_path[:-3] if source.rel_path.endswith(".py") else source.rel_path
@@ -203,7 +252,9 @@ def build_graph(root: Path | str) -> GraphResult:
         for rel, local in nodes_by_file.items()
         for edge in _defines_edges(local, file_nodes[rel])
     ]
-    external_refs: list[ExternalRef] = []
+    imports = build_import_edges(files, root)
+    edges.extend(imports.edges)
+    external_refs: list[ExternalRef] = list(imports.external_refs)
     cov = Coverage()
 
     for source in files:
@@ -220,17 +271,7 @@ def build_graph(root: Path | str) -> GraphResult:
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
 
-            try:
-                defs = script.goto(
-                    site.line,
-                    site.col,
-                    follow_imports=True,
-                    follow_builtin_imports=True,
-                )
-            except Exception as exc:  # Jedi can raise on pathological positions
-                log.debug("jedi goto failed at %s:%d: %s", source.rel_path, site.line, exc)
-                defs = []
-
+            defs = _goto(script, site, source.rel_path)
             if not defs:
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
@@ -241,9 +282,7 @@ def build_graph(root: Path | str) -> GraphResult:
                 dst = _def_node(nodes_by_file[rel], definition.line or 0)
                 if dst is not None:
                     cov.internal += 1
-                    edges.append(
-                        Edge(src_id=src_node.id, dst_id=dst.id, kind=EdgeKind.CALLS)
-                    )
+                    edges.append(Edge(src_id=src_node.id, dst_id=dst.id, kind=EdgeKind.CALLS))
                     continue
                 # Internal but resolves to a non-callable (module var, alias): still
                 # resolved, just no edge to draw.
@@ -257,6 +296,35 @@ def build_graph(root: Path | str) -> GraphResult:
                 external_refs.append(
                     ExternalRef(node_id=src_node.id, package=package, symbol=site.name)
                 )
+
+        for class_line, base in _base_sites(source):
+            cls = next(
+                (n for n in local_nodes if n.kind is NodeKind.CLASS and n.start_line == class_line),
+                None,
+            )
+            if cls is None:
+                continue
+            defs = _goto(script, base, source.rel_path) if base.col >= 0 else []
+            if not defs:
+                edges.append(
+                    Edge(
+                        src_id=cls.id,
+                        dst_id=f"unknown::{base.name}",
+                        kind=EdgeKind.INHERITS,
+                        resolved=False,
+                    )
+                )
+                continue
+            definition = defs[0]
+            rel = _relpath(definition.module_path, root)
+            if rel is not None and rel in nodes_by_file:
+                dst = _def_node(nodes_by_file[rel], definition.line or 0)
+                if dst is not None and dst.kind is NodeKind.CLASS:
+                    edges.append(Edge(src_id=cls.id, dst_id=dst.id, kind=EdgeKind.INHERITS))
+                continue
+            package = (definition.module_name or "").split(".")[0]
+            if package and not definition.in_builtin_module() and package != "builtins":
+                external_refs.append(ExternalRef(node_id=cls.id, package=package, symbol=base.name))
 
     graph = nx.MultiDiGraph()
     for node in nodes:

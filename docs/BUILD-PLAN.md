@@ -25,7 +25,7 @@ Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 | Phase | State | One-line |
 |---|---|---|
 | 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
-| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` + `defines` edges + coverage + FastAPI/Flask entry points done; import/inherit edges (grimp), Django routes, and the correctness checkpoint remain |
+| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask entry points done; Django routes, dependency-aware Jedi env, and the correctness checkpoint remain |
 | 2 — Scanners + eval | ⬜ | not started |
 | 3 — Reachability | ⬜ | not started (the core contribution) |
 | 4 — Triage + ranking | ⬜ | not started |
@@ -45,7 +45,7 @@ nothing needs re-indexing later.
 - 🚧 Data model as code. **Done:** the domain model exists as Pydantic (`ravel/models.py`) — `Node / Edge / EntryPoint / ExternalRef / Finding` incl. the post-v1 nullable fields (`runtime_evidence`, `graph_diff`, `patch`), no logic on them (§4). **Not yet:** SQLAlchemy + Alembic + Postgres/pgvector persistence — `ravel/store/` is still a stub.
 - ✅ Content-hash utility (`ravel/core/hashing.py`) — the cache-key primitive.
 - ⬜ LLM abstraction (interface only): swappable provider (Ollama / BYO key), token budget + kill switch. `triage/` `summarize/` are stubs.
-- 🚧 Fixtures: FastAPI + Flask sample apps in `eval/fixtures/`. **Not yet:** a Django app, and SHA-pinned CVE-patched OSS repos for eval.
+- 🚧 Fixtures: FastAPI + Flask sample apps in `eval/fixtures/`. Django polls app (`eval/fixtures/django_app`) ✅. **Not yet:** SHA-pinned CVE-patched OSS repos for eval.
 
 **Port / reference:** none yet.
 **Exit (🚧):** `ravel index <fixture>` runs and emits valid graph rows ✅; CI green ⬜ (no `.github/workflows` yet).
@@ -58,8 +58,8 @@ nothing needs re-indexing later.
 This is where Ravel beats Arcflow.
 
 - 🚧 Ingest: tree-sitter parse Python → function/class `Node`s with `source_hash`, docstring ✅. GitPython clone of remote repos ⬜ (local paths only so far).
-- 🚧 Resolution (the quality bar): Jedi + `ast` for scope-accurate call resolution ✅ (`ravel/graph/resolve.py`). `grimp` import graph ⬜.
-- 🚧 Edges in NetworkX (`MultiDiGraph`, keyed by kind): `calls` ✅ with **unresolved → `resolved=False`, marked `unknown`, never dropped** ✅ (§6). `defines` ✅ (file → def, class → method, def → nested def). `imports / inherits` ⬜.
+- 🚧 Resolution (the quality bar): Jedi + `ast` for scope-accurate call resolution ✅ (`ravel/graph/resolve.py`). Import graph ✅ via Python `ast` (`ravel/graph/imports.py`) — **not grimp**: grimp only graphs packages (misses `manage.py` / root scripts) and mutates `sys.path`.
+- 🚧 Edges in NetworkX (`MultiDiGraph`, keyed by kind): `calls` ✅ with **unresolved → `resolved=False`, marked `unknown`, never dropped** ✅ (§6). `defines` ✅ (file → def, class → method, def → nested def). `inherits` ✅ (Jedi-resolved; unresolvable base → `unknown`, third-party base → ExternalRef). `imports` ✅ (file → file; missing in-repo module → `unknown`, third-party → ExternalRef).
 - 🚧 ExternalRef from imports ✅ (package + symbol from call resolution); `version` field ⬜ (not populated yet).
 - ✅ Coverage metric: "% of call sites resolved" emitted in the CLI (§6).
 
@@ -69,7 +69,7 @@ This is where Ravel beats Arcflow.
 - ✅ `getParserProvenance` idea → parser provenance surfaced (`PROVENANCE`, coverage metric).
 - **Reference only (do not port as-is):** `parser-callgraph.js`, `graph-builder.js` call-linking — heuristic; we resolve properly instead.
 
-**🚩 Checkpoint (§10) — ⬜ NOT YET RUN:** call graph correct on **~20 hand-checked cases**, coverage **≥80%**. If not — stop everything and fix. All downstream value depends on graph quality. (Current: exact on the FastAPI/Flask fixtures, but no real benchmark repo hand-checked yet; FastAPI fixture coverage is 76.9%.)
+**🚩 Checkpoint (§10) — ⬜ NOT YET RUN:** call graph correct on **~20 hand-checked cases**, coverage **≥80%**. If not — stop everything and fix. All downstream value depends on graph quality. (Current: exact on the FastAPI/Flask fixtures, but no real benchmark repo hand-checked yet. Coverage is 76.9% on sample_app and 25% on django_app — **every** miss is a third-party symbol Jedi can't see because the fixture's deps aren't installed in Ravel's env. The gate is meaningless until Jedi resolves against the *scanned* repo's environment.)
 
 ---
 

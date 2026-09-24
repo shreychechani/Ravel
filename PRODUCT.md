@@ -119,7 +119,7 @@ The nullable fields are deliberate placeholders for post-v1 features so no migra
 |---|---|---|
 | Parsing | tree-sitter (`py-tree-sitter`) | |
 | Name resolution | Jedi + `ast` | Slow; cache results. Expect timeouts on large repos. |
-| Import graph | `grimp` | Purpose-built, saves significant work. |
+| Import graph | Python `ast` (`ravel/graph/imports.py`) | Resolves against our own discovered files, so loose top-level scripts (`manage.py`) and `src/` layouts work too; grimp was dropped — it only graphs packages and mutates `sys.path`. |
 | Graph ops | NetworkX | In-memory is fine at our scale (~3k nodes / 18k edges per 50k LOC). |
 | Storage | Postgres + pgvector | One DB for relational + vector. Do not add a separate vector store. |
 | Scanners | Semgrep OSS, Bandit, gitleaks, OSV-Scanner | |

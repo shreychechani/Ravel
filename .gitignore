@@ -11,7 +11,7 @@ __pycache__/
 .eggs/
 build/
 dist/
-.venv/
+.venv*
 venv/
 env/
 .python-version

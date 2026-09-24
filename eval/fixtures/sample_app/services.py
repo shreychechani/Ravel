@@ -12,6 +12,10 @@ class UserService:
         return _DB.get(str(user_id))
 
 
+class AdminService(UserService):
+    """Admin view over the same store — inherits ``find`` from UserService."""
+
+
 def get_user(user_id):
     return UserService().find(user_id)
 
