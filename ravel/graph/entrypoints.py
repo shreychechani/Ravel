@@ -15,9 +15,12 @@ an authenticated attacker, so treating auth as "trusted" would silently demote
 real vulnerabilities, the worst failure mode we have (PRODUCT.md §6). Auth is a
 finding attribute, never a reason to stop tracing.
 
-Scope (v1): decorator-based frameworks (FastAPI, Flask). Django ``urlpatterns``
-maps a route to a view *by reference*, needing cross-module resolution — a
-separate increment.
+Django ``urlpatterns`` maps a route to a view *by reference*
+(``path("x/", views.index)``), so this module only *finds* the view expressions
+(:func:`django_view_refs`); :mod:`ravel.graph.resolve` resolves them across
+modules with Jedi. Ported from the Django branch of ``parser-routes.js``, but
+matched structurally — only route calls inside a ``urlpatterns`` assignment
+count, not any line that looks like ``path(...)``.
 """
 
 from __future__ import annotations
@@ -48,6 +51,26 @@ class _RouteHit:
     handler: str  # function name, for logging
     method: str  # decorator verb, e.g. "get" / "route"
     path: str | None  # first string arg of the decorator, if any
+
+
+# Django URLconf route constructors (``url`` is the pre-2.0 form).
+DJANGO_ROUTE_FUNCS = frozenset({"path", "re_path", "url"})
+# Methods Django's ``View.dispatch`` routes a request to — the real handlers of
+# a class-based view.
+DJANGO_VIEW_METHODS = frozenset(
+    {"dispatch", "get", "post", "put", "patch", "delete", "head", "options", "trace"}
+)
+
+
+@dataclass(frozen=True)
+class ViewRef:
+    """A view expression in a Django route, positioned for Jedi to resolve."""
+
+    line: int  # 1-based line of the view's name
+    col: int  # 0-based column of the view's name
+    name: str  # e.g. "index" for ``views.index``
+    route: str | None  # the route string, for logging
+    class_view: bool  # ``X.as_view()`` — resolves to a class, not a function
 
 
 def _row(point: Any) -> int:
@@ -122,9 +145,7 @@ def _collect(dec_def: Any, data: bytes, hits: list[_RouteHit]) -> None:
             continue
         method, call = matched
         if method in ROUTE_METHODS:
-            hits.append(
-                _RouteHit(def_line, handler, method, _first_string_arg(call, data))
-            )
+            hits.append(_RouteHit(def_line, handler, method, _first_string_arg(call, data)))
 
 
 def detect_entrypoints(source: SourceFile, file_nodes: list[Node]) -> list[EntryPoint]:
@@ -162,3 +183,107 @@ def detect_entrypoints(source: SourceFile, file_nodes: list[Node]) -> list[Entry
             )
         )
     return entry_points
+
+
+def _name_pos(expr: Any, data: bytes) -> tuple[int, int, str] | None:
+    """(row, col, name) of an identifier or the last part of a dotted attribute."""
+    if expr.type == "identifier":
+        return _row(expr.start_point), int(_col(expr.start_point)), _text(expr, data)
+    if expr.type == "attribute":
+        attr = expr.child_by_field_name("attribute")
+        if attr is not None:
+            return _row(attr.start_point), int(_col(attr.start_point)), _text(attr, data)
+    return None
+
+
+def _col(point: Any) -> int:
+    return int(point.column) if hasattr(point, "column") else int(point[1])
+
+
+def _callee_name(call: Any, data: bytes) -> str | None:
+    fn = call.child_by_field_name("function")
+    pos = _name_pos(fn, data) if fn is not None else None
+    return pos[2] if pos is not None else None
+
+
+def _positional(call: Any) -> list[Any]:
+    args = call.child_by_field_name("arguments")
+    if args is None:
+        return []
+    return [a for a in args.named_children if a.type not in ("keyword_argument", "comment")]
+
+
+def _string_value(node: Any, data: bytes) -> str | None:
+    """A string literal's value — prefix (``r``/``b``/``u``) and quotes removed."""
+    if node.type != "string":
+        return None
+    return _text(node, data).lstrip("rRbBuU").strip("\"'")
+
+
+def _view_ref(expr: Any, data: bytes, route: str | None, depth: int = 0) -> ViewRef | None:
+    """Turn a route's view argument into a resolvable reference.
+
+    ``views.index`` → the function; ``ResultsView.as_view()`` → the class;
+    ``login_required(views.x)`` → unwrap to ``views.x``; ``include(...)`` → None
+    (it delegates to another URLconf, whose own routes are found separately).
+    """
+    if expr.type in ("identifier", "attribute"):
+        pos = _name_pos(expr, data)
+        return ViewRef(pos[0] + 1, pos[1], pos[2], route, False) if pos else None
+    if expr.type != "call" or depth > 3:
+        return None
+    fn = expr.child_by_field_name("function")
+    name = _callee_name(expr, data)
+    if name == "include" or fn is None:
+        return None
+    if name == "as_view" and fn.type == "attribute":
+        obj = fn.child_by_field_name("object")
+        pos = _name_pos(obj, data) if obj is not None else None
+        return ViewRef(pos[0] + 1, pos[1], pos[2], route, True) if pos else None
+    args = _positional(expr)  # a decorator used as a wrapper: csrf_exempt(view)
+    return _view_ref(args[0], data, route, depth + 1) if args else None
+
+
+def django_view_refs(source: SourceFile) -> list[ViewRef]:
+    """Every view referenced by a route call inside a ``urlpatterns`` definition."""
+    root, data = parse_to_tree(source)
+    refs: list[ViewRef] = []
+
+    def routes_in(node: Any) -> None:
+        if node.type == "call" and _callee_name(node, data) in DJANGO_ROUTE_FUNCS:
+            args = _positional(node)
+            if len(args) >= 2:
+                route = _string_value(args[0], data)
+                ref = _view_ref(args[1], data, route)
+                if ref is not None:
+                    refs.append(ref)
+        for child in node.named_children:
+            routes_in(child)  # nested include([...]) lists carry their own routes
+
+    def is_urlpatterns(node: Any) -> bool:
+        return node is not None and node.type == "identifier" and _text(node, data) == "urlpatterns"
+
+    def walk(node: Any) -> None:
+        for child in node.named_children:
+            if child.type in ("assignment", "augmented_assignment") and is_urlpatterns(
+                child.child_by_field_name("left")
+            ):
+                right = child.child_by_field_name("right")
+                if right is not None:
+                    routes_in(right)
+                continue
+            if child.type == "call":  # urlpatterns.append(...) / .extend(...)
+                fn = child.child_by_field_name("function")
+                if (
+                    fn is not None
+                    and fn.type == "attribute"
+                    and is_urlpatterns(fn.child_by_field_name("object"))
+                ):
+                    args = child.child_by_field_name("arguments")
+                    if args is not None:
+                        routes_in(args)
+                    continue
+            walk(child)
+
+    walk(root)
+    return refs

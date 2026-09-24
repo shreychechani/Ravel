@@ -1,9 +1,10 @@
 """Entry-point detection tests (BUILD-PLAN §1).
 
 Every HTTP route handler must surface as an ``untrusted`` entry point mapped to
-its real function node — that mapping is what reachability (Phase 3) seeds its
-back-trace from. Undecorated helpers must never be flagged. Fixtures are real
-Flask/FastAPI apps, not synthetic strings (AGENTS.md §5).
+its real node — that mapping is what reachability (Phase 3) seeds its
+back-trace from. Undecorated helpers must never be flagged. Django views are
+found through ``urlpatterns`` and resolved by reference. Fixtures are real
+Flask/FastAPI/Django apps, not synthetic strings (AGENTS.md §5).
 """
 
 from __future__ import annotations
@@ -61,3 +62,32 @@ def test_entrypoints_map_to_real_function_nodes() -> None:
     for ep in result.entry_points:
         assert ep.node_id in by_id
         assert by_id[ep.node_id].kind is NodeKind.FUNCTION
+
+
+DJANGO = FIXTURES / "django_app"
+
+
+def test_django_function_views_are_untrusted_entrypoints() -> None:
+    handlers = _handlers(build_graph(DJANGO))
+    for view in ("index", "detail", "vote"):
+        assert (view, EntryPointKind.HTTP_ROUTE, Trust.UNTRUSTED) in handlers
+
+
+def test_django_class_view_marks_class_and_verb_methods_only() -> None:
+    qnames = {q for q, _, _ in _handlers(build_graph(DJANGO))}
+    assert {"ResultsView", "ExportView", "ExportView.get"} <= qnames
+    assert "ExportView.rows" not in qnames  # a helper method, not a request handler
+
+
+def test_django_exact_entrypoint_set() -> None:
+    qnames = {q for q, _, _ in _handlers(build_graph(DJANGO))}
+    assert qnames == {"index", "detail", "vote", "ResultsView", "ExportView", "ExportView.get"}
+    assert "_tally" not in qnames  # called by a view, not routed
+
+
+def test_django_include_is_not_a_view() -> None:
+    # mysite/urls.py routes "polls/" via include("polls.urls"); that must not
+    # produce an entry point of its own, and polls' routes are still found.
+    result = build_graph(DJANGO)
+    by_id = {n.id: n for n in result.nodes}
+    assert all(by_id[ep.node_id].file_path == "polls/views.py" for ep in result.entry_points)

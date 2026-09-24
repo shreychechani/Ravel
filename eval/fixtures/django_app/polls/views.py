@@ -2,7 +2,7 @@
 
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
-from django.views import generic
+from django.views import View, generic
 
 from .models import Question
 
@@ -28,6 +28,18 @@ def vote(request, question_id):
 class ResultsView(generic.DetailView):
     model = Question
     template_name = "polls/results.html"
+
+
+class ExportView(View):
+    """CSV export of one question's results."""
+
+    def get(self, request, question_id):
+        question = get_object_or_404(Question, pk=question_id)
+        return HttpResponse(self.rows(question), content_type="text/csv")
+
+    def rows(self, question):
+        """Helper, not a request handler."""
+        return "\n".join(f"{c.choice_text},{c.votes}" for c in question.choice_set.all())
 
 
 def _tally(question):

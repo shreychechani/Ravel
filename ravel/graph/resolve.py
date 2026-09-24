@@ -33,11 +33,25 @@ import jedi
 import networkx as nx
 
 from ravel.core.logging import get_logger
-from ravel.graph.entrypoints import detect_entrypoints
+from ravel.graph.entrypoints import (
+    DJANGO_VIEW_METHODS,
+    ViewRef,
+    detect_entrypoints,
+    django_view_refs,
+)
 from ravel.graph.imports import build_import_edges
 from ravel.graph.parse import parse_file, parse_to_tree
 from ravel.ingest.loader import SourceFile, discover
-from ravel.models import Edge, EdgeKind, EntryPoint, ExternalRef, Node, NodeKind
+from ravel.models import (
+    Edge,
+    EdgeKind,
+    EntryPoint,
+    EntryPointKind,
+    ExternalRef,
+    Node,
+    NodeKind,
+    Trust,
+)
 
 log = get_logger("ravel.graph.resolve")
 
@@ -297,6 +311,11 @@ def build_graph(root: Path | str) -> GraphResult:
                     ExternalRef(node_id=src_node.id, package=package, symbol=site.name)
                 )
 
+        for ref in django_view_refs(source):
+            entry_points.extend(
+                _django_entrypoints(script, ref, source.rel_path, root, nodes_by_file)
+            )
+
         for class_line, base in _base_sites(source):
             cls = next(
                 (n for n in local_nodes if n.kind is NodeKind.CLASS and n.start_line == class_line),
@@ -326,6 +345,8 @@ def build_graph(root: Path | str) -> GraphResult:
             if package and not definition.in_builtin_module() and package != "builtins":
                 external_refs.append(ExternalRef(node_id=cls.id, package=package, symbol=base.name))
 
+    entry_points = _dedupe(entry_points)
+
     graph = nx.MultiDiGraph()
     for node in nodes:
         graph.add_node(node.id, kind=node.kind.value, qualified_name=node.qualified_name)
@@ -354,6 +375,67 @@ def build_graph(root: Path | str) -> GraphResult:
         entry_points=entry_points,
         coverage=cov,
     )
+
+
+def _django_entrypoints(
+    script: Any,
+    ref: ViewRef,
+    rel_path: str,
+    root: Path,
+    nodes_by_file: dict[str, list[Node]],
+) -> list[EntryPoint]:
+    """Resolve a Django route's view to its node(s) and mark them untrusted.
+
+    A function view is the entry point. A class-based view (``X.as_view()``)
+    marks the class plus the HTTP-verb methods it defines — the handlers
+    ``View.dispatch`` actually calls. A view that resolves outside the repo
+    (e.g. ``admin.site.urls``) has no node of ours to mark. A view we cannot
+    resolve at all is logged loudly: it is an entry point we'd otherwise lose.
+    """
+    site = CallSite(ref.line, ref.col, ref.name)
+    defs = _goto(script, site, rel_path)
+    if not defs:
+        log.warning(
+            "django view %r (route %r) at %s:%d could not be resolved — not an entry point",
+            ref.name,
+            ref.route,
+            rel_path,
+            ref.line,
+        )
+        return []
+    definition = defs[0]
+    rel = _relpath(definition.module_path, root)
+    if rel is None or rel not in nodes_by_file:
+        return []  # a third-party view — no in-repo node to seed from
+    view = _def_node(nodes_by_file[rel], definition.line or 0)
+    if view is None:
+        return []
+
+    targets = [view]
+    if view.kind is NodeKind.CLASS:
+        prefix = f"{view.qualified_name}."
+        targets += [
+            n
+            for n in nodes_by_file[rel]
+            if n.kind is NodeKind.FUNCTION
+            and n.qualified_name.startswith(prefix)
+            and n.qualified_name[len(prefix) :] in DJANGO_VIEW_METHODS
+        ]
+    return [
+        EntryPoint(node_id=n.id, kind=EntryPointKind.HTTP_ROUTE, trust=Trust.UNTRUSTED)
+        for n in targets
+    ]
+
+
+def _dedupe(entry_points: list[EntryPoint]) -> list[EntryPoint]:
+    """One entry point per node — a view can be routed more than once."""
+    seen: set[str] = set()
+    out: list[EntryPoint] = []
+    for ep in entry_points:
+        if ep.node_id not in seen:
+            seen.add(ep.node_id)
+            out.append(ep)
+    return out
 
 
 def _defines_edges(local: list[Node], file_node: Node) -> list[Edge]:

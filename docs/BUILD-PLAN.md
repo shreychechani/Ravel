@@ -25,7 +25,7 @@ Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 | Phase | State | One-line |
 |---|---|---|
 | 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
-| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask entry points done; Django routes, dependency-aware Jedi env, and the correctness checkpoint remain |
+| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask/Django entry points done; dependency-aware Jedi env and the correctness checkpoint remain |
 | 2 — Scanners + eval | ⬜ | not started |
 | 3 — Reachability | ⬜ | not started (the core contribution) |
 | 4 — Triage + ranking | ⬜ | not started |
@@ -64,7 +64,7 @@ This is where Ravel beats Arcflow.
 - ✅ Coverage metric: "% of call sites resolved" emitted in the CLI (§6).
 
 **Port from reference:**
-- 🚧 `reference/Arcflow/js/analysis/parser-routes.js` → Python entry-point detection. **FastAPI/Flask `@app.get`/`@router.*`/`@app.route(..., methods=[...])` done** (`ravel/graph/entrypoints.py`, tree-sitter AST). **Django `urlpatterns` ⬜** (needs cross-module view resolution). `authProtected` regex **deliberately not ported** → all HTTP routes stay `untrusted`; auth ≠ trusted input (§6).
+- 🚧 `reference/Arcflow/js/analysis/parser-routes.js` → Python entry-point detection. **FastAPI/Flask `@app.get`/`@router.*`/`@app.route(..., methods=[...])` done** (`ravel/graph/entrypoints.py`, tree-sitter AST). **Django `urlpatterns` ✅** — route calls inside `urlpatterns` found structurally, views resolved by reference with Jedi; `X.as_view()` marks the class + its HTTP-verb methods; `include()` skipped; wrapper calls unwrapped; unresolvable views logged as warnings. `authProtected` regex **deliberately not ported** → all HTTP routes stay `untrusted`; auth ≠ trusted input (§6).
 - ⬜ Entry-point / dead-code **exclusion lists** in `graph-builder.js` (`main`, `create_app`, `on_startup`, migration `upgrade`/`downgrade`, `test_*`, dunders) — not needed until CLI/script entry detection or dead-code lands.
 - ✅ `getParserProvenance` idea → parser provenance surfaced (`PROVENANCE`, coverage metric).
 - **Reference only (do not port as-is):** `parser-callgraph.js`, `graph-builder.js` call-linking — heuristic; we resolve properly instead.
