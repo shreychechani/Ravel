@@ -70,6 +70,8 @@ class CallSite:
     line: int  # 1-based line of the callee name
     col: int  # 0-based column of the callee name; -1 => no resolvable position
     name: str  # callee text, e.g. "get_user" or "find"
+    # "call": ``f()`` · "decorator": bare ``@dec`` (called when the def runs)
+    kind: str = "call"
 
 
 @dataclass
@@ -132,13 +134,26 @@ def _callee(fn: Any, data: bytes) -> tuple[int, int, str] | None:
 
 
 def _call_sites(source: SourceFile) -> list[CallSite]:
-    """Walk the tree and collect every call expression in the file."""
+    """Walk the tree and collect every call site in the file.
+
+    Besides call expressions, a bare decorator ``@dec`` is an implicit call:
+    it runs ``dec(func)`` at definition time — dropping it silently loses e.g.
+    ``@login_required``. Decorators with arguments are already calls.
+    """
     root, data = parse_to_tree(source)
     out: list[CallSite] = []
 
+    def implicit(expr: Any, kind: str) -> None:
+        info = _callee(expr, data) if expr.type in ("identifier", "attribute") else None
+        if info is not None:
+            row, col, name = info
+            out.append(CallSite(row + 1, col, name, kind))
+
     def walk(node: Any) -> None:
         for child in node.named_children:
-            if child.type == "call":
+            if child.type == "decorator" and child.named_children:
+                implicit(child.named_children[0], "decorator")
+            elif child.type == "call":
                 fn = child.child_by_field_name("function")
                 if fn is not None:
                     info = _callee(fn, data)

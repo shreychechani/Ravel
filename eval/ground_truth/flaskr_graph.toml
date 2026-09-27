@@ -11,6 +11,10 @@
 # and Jedi follows pytest fixture injection. Each edge was re-verified against
 # its source line. An independent re-check of this file is still wanted.
 #
+# Revision 2 (2026-09-27): decorator application is a call — `@login_required`
+# runs `login_required(create)` when blog.py is imported. PyCG's published
+# ground truth counts it (decorators/*), and this file originally missed it.
+#
 # [[edge]]     — an in-repo call that MUST resolve to a `calls` edge.
 #                The list is EXHAUSTIVE: every call from repo code to a repo
 #                function/class is here, so any other resolved internal edge
@@ -154,6 +158,12 @@ src = "tests/test_factory.py::test_config"
 dst = "flaskr/__init__.py::create_app"
 line = 6
 note = "called twice (lines 6, 7) — one edge"
+
+[[edge]]
+src = "flaskr/blog.py::flaskr.blog"
+dst = "flaskr/auth.py::login_required"
+line = 61
+note = "bare @login_required on create/update/delete (lines 61, 87, 114) — module-level, one edge"
 
 # ------------------------------------------- tests/ — pytest fixtures
 # `auth` param -> conftest `auth` fixture -> AuthActions(client).
