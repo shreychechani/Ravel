@@ -39,6 +39,7 @@ from ravel.graph.entrypoints import (
     detect_entrypoints,
     django_view_refs,
 )
+from ravel.graph.environment import PythonEnv, discover_env, jedi_sys_path
 from ravel.graph.imports import build_import_edges
 from ravel.graph.parse import parse_file, parse_to_tree
 from ravel.ingest.loader import SourceFile, discover
@@ -95,6 +96,7 @@ class GraphResult:
     external_refs: list[ExternalRef] = field(default_factory=list)
     entry_points: list[EntryPoint] = field(default_factory=list)
     coverage: Coverage = field(default_factory=Coverage)
+    environment: PythonEnv = field(default_factory=lambda: PythonEnv(venv=None))
 
 
 def _pt(point: Any) -> tuple[int, int]:
@@ -239,9 +241,14 @@ def _relpath(module_path: Any, root: Path) -> str | None:
         return None
 
 
-def build_graph(root: Path | str) -> GraphResult:
-    """Discover, parse, and resolve a Python repo into a call graph."""
+def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
+    """Discover, parse, and resolve a Python repo into a call graph.
+
+    ``venv`` points at the repo's virtualenv when it isn't in a conventional
+    in-repo location; see :mod:`ravel.graph.environment`.
+    """
     root = Path(root).resolve()
+    env = discover_env(root, venv)
     files = discover(root)
 
     nodes: list[Node] = []
@@ -260,7 +267,7 @@ def build_graph(root: Path | str) -> GraphResult:
     for source in files:
         entry_points.extend(detect_entrypoints(source, nodes_by_file[source.rel_path]))
 
-    project = jedi.Project(str(root))
+    project = jedi.Project(str(root), sys_path=jedi_sys_path(env))
     edges: list[Edge] = [
         edge
         for rel, local in nodes_by_file.items()
@@ -374,6 +381,7 @@ def build_graph(root: Path | str) -> GraphResult:
         external_refs=external_refs,
         entry_points=entry_points,
         coverage=cov,
+        environment=env,
     )
 
 

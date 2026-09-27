@@ -46,11 +46,23 @@ def index(
         Path | None,
         typer.Option("--json", help="Write the extracted nodes to this JSON file."),
     ] = None,
+    venv: Annotated[
+        Path | None,
+        typer.Option(
+            "--venv",
+            exists=True,
+            file_okay=False,
+            help="The repo's virtualenv, if not at PATH/.venv, venv or env. Read, never run.",
+        ),
+    ] = None,
 ) -> None:
     """Index a Python repo: build the call graph and report coverage."""
     configure_logging()
 
-    result = build_graph(path)
+    try:
+        result = build_graph(path, venv=venv)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--venv") from exc
     nodes = result.nodes
     cov = result.coverage
 
@@ -81,6 +93,8 @@ def index(
     table.add_row("  └─ unresolved", str(cov.unresolved))
     table.add_row("Resolution coverage", f"[{cov_style}]{cov_pct:.1f}%[/{cov_style}]")
     table.add_row("Parser", PROVENANCE)
+    env_style = "green" if result.environment.found else "yellow"
+    table.add_row("Python env", f"[{env_style}]{result.environment.describe()}[/{env_style}]")
     console.print(table)
 
     if result.entry_points:
@@ -110,6 +124,10 @@ def index(
                 "external": cov.external,
                 "unresolved": cov.unresolved,
                 "ratio": cov.ratio,
+            },
+            "environment": {
+                "venv": str(result.environment.venv) if result.environment.venv else None,
+                "site_packages": [str(p) for p in result.environment.site_packages],
             },
         }
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")

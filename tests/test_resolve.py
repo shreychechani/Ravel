@@ -109,16 +109,21 @@ def test_internal_base_class_is_an_inherits_edge() -> None:
     assert pairs == {("AdminService", "UserService")}
 
 
-def test_third_party_base_class_is_an_external_ref() -> None:
-    result = build_graph(FIXTURE)
+def test_third_party_base_class_is_an_external_ref(tmp_path: Path) -> None:
+    # Resolves only once the repo's own environment provides pydantic.
+    site = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
+    (site / "pydantic").mkdir(parents=True)
+    (site / "pydantic" / "__init__.py").write_text("class BaseModel: ...\n", encoding="utf-8")
+    (tmp_path / "venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    result = build_graph(FIXTURE, venv=tmp_path / "venv")
     by_id = {n.id: n.qualified_name for n in result.nodes}
     refs = {(by_id[r.node_id], r.package, r.symbol) for r in result.external_refs}
     assert ("UserIn", "pydantic", "BaseModel") in refs
 
 
 def test_unresolvable_base_class_is_kept_as_unknown() -> None:
-    # fastapi is not installed in Ravel's env, so Jedi cannot see HTTPException —
-    # the base must survive as an unknown inherits edge, not vanish (PRODUCT.md §6).
+    # With no repo environment, Jedi cannot see fastapi or pydantic — each base
+    # must survive as an unknown inherits edge, not vanish (PRODUCT.md §6).
     result = build_graph(FIXTURE)
     by_id = {n.id: n.qualified_name for n in result.nodes}
     unknown = {
@@ -126,7 +131,10 @@ def test_unresolvable_base_class_is_kept_as_unknown() -> None:
         for e in result.edges
         if e.kind is EdgeKind.INHERITS and not e.resolved
     }
-    assert unknown == {("UserNotFound", "unknown::HTTPException")}
+    assert unknown == {
+        ("UserNotFound", "unknown::HTTPException"),
+        ("UserIn", "unknown::BaseModel"),
+    }
 
 
 def test_base_classes_do_not_count_as_call_sites() -> None:
