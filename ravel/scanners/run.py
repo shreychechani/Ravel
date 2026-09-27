@@ -56,7 +56,13 @@ def scan_repo(
 
     results = [s.scan(root, files) for s in (scanners or default_scanners())]
     raw = [f for r in results for f in r.findings]
-    findings, mapping = normalize(raw, graph.nodes, root)
+    findings, mapping = normalize(
+        raw,
+        graph.nodes,
+        root,
+        external_refs=graph.external_refs,
+        site_packages=list(graph.environment.site_packages),
+    )
     log.info(
         "scan: %d findings from %d scanner(s), %.1f%% mapped to nodes",
         len(findings),

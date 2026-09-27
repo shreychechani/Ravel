@@ -152,3 +152,4 @@ def test_live_offline_scan_of_the_django_fixture() -> None:
     assert {"django", "sqlparse"} <= packages
     sqli = next(f for f in report.findings if f.finding.rule_id == "CVE-2021-35042")
     assert sqli.raw.fixed_in == "3.2.5"
+    assert sqli.anchors  # linked to the code that imports Django

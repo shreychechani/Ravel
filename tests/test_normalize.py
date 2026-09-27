@@ -160,3 +160,91 @@ def test_non_python_findings_are_kept_but_outside_the_mapping_rate(flaskr: ScanR
     # Same line + CWE in two different templates must not collapse into one group.
     assert cross_scanner_duplicates(dedupe(findings)) == 0
     assert len(dedupe(findings)) == 3
+
+
+def _dep(package: str, rule: str, manifest: str = "requirements.txt") -> RawFinding:
+    return RawFinding(
+        source=FindingSource.OSV,
+        rule_id=rule,
+        rel_path=manifest,
+        line=0,
+        end_line=0,
+        raw_severity="7.5",
+        severity=Severity.HIGH,
+        confidence=None,
+        cwe="CWE-400",
+        message="known vulnerability",
+        package=package,
+        package_version="1.0",
+    )
+
+
+def _site(tmp_path: Path, dists: dict[str, list[str]]) -> Path:
+    """An environment's site-packages: dist-info METADATA with Requires-Dist."""
+    site = tmp_path / "site-packages"
+    for name, requires in dists.items():
+        info = site / f"{name}-1.0.dist-info"
+        info.mkdir(parents=True)
+        lines = [f"Name: {name}", *(f"Requires-Dist: {r}" for r in requires)]
+        (info / "METADATA").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (info / "top_level.txt").write_text(name.lower() + "\n", encoding="utf-8")
+    return site
+
+
+def test_dependency_findings_link_once_to_every_importer(tmp_path: Path) -> None:
+    report = scan_repo(DJANGO)
+    raws = [_dep("Django", "CVE-A"), _dep("Django", "CVE-B")]
+    findings, stats = normalize(
+        raws, report.graph.nodes, DJANGO, external_refs=report.graph.external_refs
+    )
+    assert len(findings) == 2  # one per advisory — never one per importer
+    assert stats.to_package == 2 and stats.ratio == 1.0
+    anchors = findings[0].anchors
+    assert anchors and all(n.file_path.endswith(".py") for n in anchors)
+    assert findings[0].node is None and findings[0].finding.node_id == ""
+
+
+def test_transitive_dependency_links_via_the_package_requiring_it(tmp_path: Path) -> None:
+    # The Django app never imports sqlparse — but Django requires it, so it runs.
+    report = scan_repo(DJANGO)
+    site = _site(
+        tmp_path,
+        {
+            "Django": ["sqlparse>=0.2.2", "argon2-cffi; extra == 'argon2'"],
+            "sqlparse": [],
+            "leftpad": [],
+        },
+    )
+    raws = [_dep("sqlparse", "CVE-S"), _dep("leftpad", "CVE-L"), _dep("argon2-cffi", "CVE-X")]
+    findings, stats = normalize(
+        raws, report.graph.nodes, DJANGO, report.graph.external_refs, [site]
+    )
+    by_pkg = {f.raw.package: f for f in findings}
+    assert by_pkg["sqlparse"].via == ("django",)
+    assert by_pkg["sqlparse"].anchors  # Django's importers
+    assert stats.via_dependency == 1
+    # Nothing imports or requires leftpad; argon2-cffi is only an optional extra.
+    assert not by_pkg["leftpad"].anchors and not by_pkg["argon2-cffi"].anchors
+    assert stats.unused_dependency == 2
+    assert stats.ratio == 1.0
+
+
+def test_without_an_environment_unimported_deps_are_unknown_not_unused() -> None:
+    report = scan_repo(DJANGO)
+    findings, stats = normalize(
+        [_dep("sqlparse", "CVE-S")], report.graph.nodes, DJANGO, report.graph.external_refs
+    )
+    assert stats.dependency_unknown == 1  # never claimed unused, never unreachable
+    assert stats.unused_dependency == 0
+    assert findings[0].anchors == ()
+
+
+def test_dependency_ids_ignore_the_manifest_and_distinct_cves_never_merge() -> None:
+    report = scan_repo(DJANGO)
+    a, _ = normalize([_dep("Django", "CVE-A", "requirements.txt")], report.graph.nodes, DJANGO)
+    b, _ = normalize([_dep("Django", "CVE-A", "pyproject.toml")], report.graph.nodes, DJANGO)
+    assert a[0].finding.id == b[0].finding.id  # the bug, not where it was declared
+    both, _ = normalize(
+        [_dep("Django", "CVE-A"), _dep("Django", "CVE-B")], report.graph.nodes, DJANGO
+    )
+    assert len(dedupe(both)) == 2  # same CWE, different advisories: separate
