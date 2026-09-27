@@ -26,7 +26,7 @@ Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 |---|---|---|
 | 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
 | 1 — Graph slice | ✅ | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask/Django entry points + dependency-aware Jedi env; **correctness checkpoint passed** on flaskr (42/42 cases, 81.6% coverage), plus external checks: PyCG benchmark (98.3% precision / 71.2% recall) and dynamic-oracle recall (89.7%) — pending an independent re-check of the flaskr ground truth |
-| 2 — Scanners + eval | 🚧 | Bandit wrapped, findings anchored on graph nodes (100% mapped on fixtures) with content-hash ids + cross-scanner dedupe, `ravel scan`; Semgrep / gitleaks / OSV and the eval harness not yet |
+| 2 — Scanners + eval | 🚧 | Bandit + Semgrep (user-supplied local rules) wrapped, findings anchored on graph nodes (100% of Python findings mapped on fixtures) with content-hash ids + cross-scanner dedupe, `ravel scan`; gitleaks / OSV (offline DB) and the eval harness not yet |
 | 3 — Reachability | ⬜ | not started (the core contribution) |
 | 4 — Triage + ranking | ⬜ | not started |
 | 5 — Interface + deps + incremental | ⬜ | not started |
@@ -93,7 +93,9 @@ This is where Ravel beats Arcflow.
   - ✅ **Normalization** (`ravel/scanners/normalize.py`): each finding anchored on the innermost function/class holding its line, else the FILE node (module-level); mapping rate reported with the function-vs-file split (fixtures: 100%). Finding ids are content hashes of scanner + rule + node `source_hash` + flagged line text — they survive code moving and change when the code does (§6, tested).
   - ✅ **Cross-scanner dedupe** (research/07 2.4): same node + same CWE (else rule) + same line → one group; duplicates are grouped for scoring, never dropped from the report.
   - ✅ `ravel scan PATH [--venv] [--json]`: scanner status table (unintegrated scanners listed as such), mapping rate, graph coverage + Python env, findings.
-  - ⬜ **Semgrep**, **OSV-Scanner** — need a decision first (rule source / network access vs. "never phone home"); ⬜ **gitleaks** (Go binary on PATH).
+  - ✅ **Semgrep** (`ravel/scanners/semgrep.py`) — *decided 2026-09-27: user-supplied local rules only.* Ravel ships no rules (the public `semgrep-rules` repo is under the Semgrep Rules License) and refuses registry configs (`p/…`, `auto`, URLs), which download on every run. Runs with metrics and the version check off, so a scan makes no network call. No `--semgrep-config` → reported `not_configured`, never silently skipped. Rule ids drop the rules' on-disk location so finding ids stay path-free.
+  - ✅ **Non-Python findings** (Semgrep scans templates too): kept in the report with no node, counted as `non_python`, outside the Python mapping-rate gate — on flaskr, 5 CSRF hits in Jinja templates (a Django rule misfiring on Flask).
+  - ⬜ **OSV-Scanner** — *decided 2026-09-27: offline database only.* An explicit step downloads the OSV DB; scans run `--offline` and report the DB date. Needs a design for anchoring package-level findings on nodes (via `ExternalRef`s). ⬜ **gitleaks** (Go binary on PATH).
   - First real signal: Bandit reports **38 findings on flaskr, 35 of them `assert` in test files (B101)** — none reachable from a request. That's the noise Phase 3 must cut, without Ravel suppressing any rule.
 - Eval harness — **built early, owned by whoever is NOT building triage** (§10, §12): `eval/run.py`, pinned CVE repos, ground-truth files, reproducible from one command. **Always reports precision *and* recall together** (§6).
 
