@@ -61,6 +61,8 @@ log = get_logger("ravel.graph.resolve")
 _CALLABLE_KINDS = {NodeKind.FUNCTION, NodeKind.CLASS}
 _CALLABLE_TYPES = {"function", "class"}  # Jedi definition types that are callees
 _BINDING_TYPES = {"param", "statement"}  # a name binding, not the callee itself
+# Builtins that run code built at runtime: the call resolves, the code it runs can't.
+_DYNAMIC_EXEC = {"eval", "exec"}
 
 
 @dataclass(frozen=True)
@@ -375,7 +377,9 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
                 continue
 
             definition = definition or _target(script, site, source.rel_path, root)
-            if definition is None:
+            if definition is None or (
+                definition.name in _DYNAMIC_EXEC and definition.in_builtin_module()
+            ):
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
 
