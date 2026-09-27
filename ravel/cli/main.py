@@ -2,7 +2,9 @@
 
 ``ravel index PATH`` builds the call graph and reports coverage.
 ``ravel scan PATH`` runs the security scanners and anchors every finding on a
-graph node. Later phases add reachability and triage.
+graph node. ``ravel osv-db update`` downloads the offline vulnerability
+database — the only Ravel command that uses the network. Later phases add
+reachability and triage.
 """
 
 from __future__ import annotations
@@ -20,10 +22,13 @@ from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
 from ravel.models import EdgeKind, NodeKind
 from ravel.scanners.base import ScanStatus
-from ravel.scanners.normalize import cross_scanner_duplicates
+from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
+from ravel.scanners.osv import default_db_dir, update_db
 from ravel.scanners.run import default_scanners, scan_repo
 
 app = typer.Typer(add_completion=False, help="Ravel — reachability-aware security triage.")
+osv_db_app = typer.Typer(help="Manage the offline OSV vulnerability database.")
+app.add_typer(osv_db_app, name="osv-db")
 console = Console()
 log = get_logger("ravel.cli")
 
@@ -172,11 +177,18 @@ def scan(
     semgrep_bin: Annotated[
         Path | None, typer.Option("--semgrep-bin", help="Path to the semgrep executable.")
     ] = None,
+    osv_db: Annotated[
+        Path | None,
+        typer.Option("--osv-db", help="Offline OSV database dir (default: $RAVEL_OSV_DB)."),
+    ] = None,
+    osv_bin: Annotated[
+        Path | None, typer.Option("--osv-bin", help="Path to the osv-scanner executable.")
+    ] = None,
 ) -> None:
     """Run the security scanners and anchor each finding on a graph node."""
     configure_logging()
     try:
-        scanners = default_scanners(semgrep_config, semgrep_bin)
+        scanners = default_scanners(semgrep_config, semgrep_bin, osv_db, osv_bin)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--semgrep-config") from exc
     try:
@@ -189,6 +201,7 @@ def scan(
     status_table.add_column("status")
     status_table.add_column("version")
     status_table.add_column("findings", justify="right")
+    status_table.add_column("detail")
     for r in report.results:
         style = {ScanStatus.OK: "green", ScanStatus.NOT_CONFIGURED: "yellow"}.get(r.status, "red")
         status_table.add_row(
@@ -196,10 +209,11 @@ def scan(
             f"[{style}]{r.status.value}[/{style}]",
             r.version or "-",
             str(len(r.findings)),
+            r.detail or "",
         )
     for missing in report.not_integrated:
         # Never imply full coverage: a scanner we don't run is recall we don't have.
-        status_table.add_row(missing.value, "[yellow]not integrated yet[/yellow]", "-", "-")
+        status_table.add_row(missing.value, "[yellow]not integrated yet[/yellow]", "-", "-", "")
     console.print(status_table)
 
     m = report.mapping
@@ -211,8 +225,18 @@ def scan(
     summary.add_row("Mapped to a node (gate ≥95%)", f"[{style}]{m.ratio:.1%}[/{style}]")
     summary.add_row("  ├─ function / class", str(m.to_def))
     summary.add_row("  ├─ module level (file node)", str(m.to_file))
+    summary.add_row("  ├─ dependency, linked to its importers", str(m.to_package))
+    summary.add_row(
+        "  ├─ transitive dependency, via a package that needs it", str(m.via_dependency)
+    )
     summary.add_row("  └─ unmapped", str(m.unmapped))
     summary.add_row("Non-Python files (no node; outside the rate)", str(m.non_python))
+    summary.add_row(
+        "Unused deps: nothing imports or needs them (outside)", str(m.unused_dependency)
+    )
+    summary.add_row(
+        "Deps not imported, usage unknown — no env (outside)", str(m.dependency_unknown)
+    )
     summary.add_row("Cross-scanner duplicates", str(cross_scanner_duplicates(report.groups)))
     cov = report.graph.coverage.ratio
     # <60% coverage invalidates reachability claims built on this graph (PRODUCT.md §9).
@@ -234,8 +258,8 @@ def scan(
                 lf.finding.rule_id,
                 lf.raw.severity.value,
                 lf.finding.cwe or "-",
-                f"{lf.raw.rel_path}:{lf.raw.line}",
-                lf.node.qualified_name if lf.node else "[dim](non-Python file)[/dim]",
+                _location(lf),
+                _anchor_label(lf),
             )
         console.print(table)
 
@@ -247,6 +271,7 @@ def scan(
                     "status": r.status.value,
                     "version": r.version,
                     "errors": r.errors,
+                    "detail": r.detail,
                 }
                 for r in report.results
             ],
@@ -257,6 +282,10 @@ def scan(
                 "to_file": m.to_file,
                 "unmapped": m.unmapped,
                 "non_python": m.non_python,
+                "to_package": m.to_package,
+                "via_dependency": m.via_dependency,
+                "unused_dependency": m.unused_dependency,
+                "dependency_unknown": m.dependency_unknown,
                 "ratio": m.ratio,
             },
             "findings": [
@@ -268,12 +297,57 @@ def scan(
                     "severity": lf.raw.severity.value,
                     "confidence": lf.raw.confidence,
                     "message": lf.raw.message,
+                    "package": lf.raw.package,
+                    "package_version": lf.raw.package_version,
+                    "fixed_in": lf.raw.fixed_in,
+                    "aliases": list(lf.raw.aliases),
+                    "anchors": [n.id for n in lf.anchors],
+                    "via": list(lf.via),
                 }
                 for lf in report.findings
             ],
         }
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote %d findings to %s", len(report.findings), json_out)
+
+
+def _location(lf: LocatedFinding) -> str:
+    if lf.raw.package is not None:
+        return f"{lf.raw.package} {lf.raw.package_version or '?'} ({lf.raw.rel_path})"
+    return f"{lf.raw.rel_path}:{lf.raw.line}"
+
+
+def _anchor_label(lf: LocatedFinding) -> str:
+    if lf.node is not None:
+        return lf.node.qualified_name
+    if lf.raw.package is not None:
+        n = len(lf.anchors)
+        if not n:
+            return "[dim]not imported by repo code[/dim]"
+        via = f" via {', '.join(lf.via)}" if lf.via else ""
+        return f"{n} importer{'s' if n != 1 else ''}{via}"
+    return "[dim](non-Python file)[/dim]"
+
+
+@osv_db_app.command("update")
+def osv_db_update(
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Where to keep the database (default: $RAVEL_OSV_DB)."),
+    ] = None,
+    osv_bin: Annotated[
+        Path | None, typer.Option("--osv-bin", help="Path to the osv-scanner executable.")
+    ] = None,
+) -> None:
+    """Download the PyPI OSV database for offline scans (uses the network)."""
+    configure_logging()
+    target = db or default_db_dir()
+    try:
+        date = update_db(target, osv_bin)
+    except (FileNotFoundError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"OSV database ready at {target} (dated {date.isoformat()})")
 
 
 def run() -> None:

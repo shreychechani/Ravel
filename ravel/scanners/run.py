@@ -17,20 +17,29 @@ from ravel.scanners.normalize import (
     dedupe,
     normalize,
 )
+from ravel.scanners.osv import OsvScanner
 from ravel.scanners.semgrep import SemgrepScanner
 
 log = get_logger("ravel.scanners.run")
 
 # Scanners in PRODUCT.md §5 that have no wrapper yet. Listed so every report
 # states the recall it is missing instead of implying full coverage.
-NOT_YET_INTEGRATED = (FindingSource.GITLEAKS, FindingSource.OSV)
+NOT_YET_INTEGRATED = (FindingSource.GITLEAKS,)
 
 
 def default_scanners(
-    semgrep_configs: list[str] | None = None, semgrep_bin: Path | None = None
+    semgrep_configs: list[str] | None = None,
+    semgrep_bin: Path | None = None,
+    osv_db: Path | None = None,
+    osv_bin: Path | None = None,
 ) -> list[Scanner]:
-    """Every integrated scanner. Semgrep runs only with user-supplied local rules."""
-    return [BanditScanner(), SemgrepScanner(semgrep_configs, semgrep_bin)]
+    """Every integrated scanner. Semgrep runs only with user-supplied local
+    rules; OSV only against an offline database the user downloaded."""
+    return [
+        BanditScanner(),
+        SemgrepScanner(semgrep_configs, semgrep_bin),
+        OsvScanner(osv_db, osv_bin),
+    ]
 
 
 @dataclass
