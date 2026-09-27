@@ -50,6 +50,12 @@ class RawFinding:
     confidence: str | None
     cwe: str | None  # normalized "CWE-<n>"
     message: str
+    # Dependency findings (OSV): a vulnerable *package*, not a line of code.
+    # ``rel_path`` is then the manifest that declares it and ``line`` is 0.
+    package: str | None = None
+    package_version: str | None = None
+    fixed_in: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass
@@ -61,6 +67,7 @@ class ScanResult:
     version: str | None = None
     findings: list[RawFinding] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)  # per-file problems the tool reported
+    detail: str | None = None  # e.g. the offline database's date — shown with the status
 
 
 class Scanner(Protocol):
