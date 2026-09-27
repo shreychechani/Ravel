@@ -70,7 +70,9 @@ class CallSite:
     line: int  # 1-based line of the callee name
     col: int  # 0-based column of the callee name; -1 => no resolvable position
     name: str  # callee text, e.g. "get_user" or "find"
-    # "call": ``f()`` · "decorator": bare ``@dec`` (called when the def runs)
+    # "call": ``f()`` · "decorator": bare ``@dec`` (called when the def runs) ·
+    # "raise": ``raise E`` — calls ``E()`` *if* ``E`` is a class; re-raising an
+    # instance calls nothing.
     kind: str = "call"
 
 
@@ -136,9 +138,10 @@ def _callee(fn: Any, data: bytes) -> tuple[int, int, str] | None:
 def _call_sites(source: SourceFile) -> list[CallSite]:
     """Walk the tree and collect every call site in the file.
 
-    Besides call expressions, a bare decorator ``@dec`` is an implicit call:
-    it runs ``dec(func)`` at definition time — dropping it silently loses e.g.
-    ``@login_required``. Decorators with arguments are already calls.
+    Besides call expressions, two implicit calls with no parentheses: a bare
+    decorator ``@dec`` (runs ``dec(func)`` at definition time — dropping it
+    silently loses e.g. ``@login_required``), and ``raise E`` (instantiates
+    ``E`` when it is a class). Decorators with arguments are already calls.
     """
     root, data = parse_to_tree(source)
     out: list[CallSite] = []
@@ -153,6 +156,8 @@ def _call_sites(source: SourceFile) -> list[CallSite]:
         for child in node.named_children:
             if child.type == "decorator" and child.named_children:
                 implicit(child.named_children[0], "decorator")
+            elif child.type == "raise_statement" and child.named_children:
+                implicit(child.named_children[0], "raise")
             elif child.type == "call":
                 fn = child.child_by_field_name("function")
                 if fn is not None:
@@ -353,6 +358,12 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
         script = partial(jedi.Script, code=source.content, path=str(source.path), project=project)
         local_nodes = nodes_by_file[source.rel_path]
         for site in _call_sites(source):
+            definition = None
+            if site.kind == "raise":
+                # Only a raised *class* is a call; `raise err` re-raises an instance.
+                definition = _target(script, site, source.rel_path, root)
+                if definition is None or definition.type != "class":
+                    continue
             cov.total += 1
             src_node = (
                 _enclosing(local_nodes, site.line, {NodeKind.FUNCTION})
@@ -363,7 +374,7 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
 
-            definition = _target(script, site, source.rel_path, root)
+            definition = definition or _target(script, site, source.rel_path, root)
             if definition is None:
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
