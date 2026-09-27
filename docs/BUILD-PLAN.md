@@ -18,14 +18,14 @@ Python**, we do not import or run it. See the reuse map before porting anything.
 
 ---
 
-## Status (2026-09-16)
+## Status (2026-09-27)
 
 Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 
 | Phase | State | One-line |
 |---|---|---|
 | 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
-| 1 — Graph slice | 🚧 | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask/Django entry points done; dependency-aware Jedi env and the correctness checkpoint remain |
+| 1 — Graph slice | ✅ | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask/Django entry points + dependency-aware Jedi env; **correctness checkpoint passed** on flaskr (42/42 cases, 81.6% coverage), plus external checks: PyCG benchmark (98.3% precision / 71.2% recall) and dynamic-oracle recall (89.7%) — pending an independent re-check of the flaskr ground truth |
 | 2 — Scanners + eval | ⬜ | not started |
 | 3 — Reachability | ⬜ | not started (the core contribution) |
 | 4 — Triage + ranking | ⬜ | not started |
@@ -62,6 +62,7 @@ This is where Ravel beats Arcflow.
 - 🚧 Edges in NetworkX (`MultiDiGraph`, keyed by kind): `calls` ✅ with **unresolved → `resolved=False`, marked `unknown`, never dropped** ✅ (§6). `defines` ✅ (file → def, class → method, def → nested def). `inherits` ✅ (Jedi-resolved; unresolvable base → `unknown`, third-party base → ExternalRef). `imports` ✅ (file → file; missing in-repo module → `unknown`, third-party → ExternalRef).
 - 🚧 ExternalRef from imports ✅ (package + symbol from call resolution); `version` field ⬜ (not populated yet).
 - ✅ Coverage metric: "% of call sites resolved" emitted in the CLI (§6).
+- ✅ Dependency-aware resolution (`ravel/graph/environment.py`): Jedi resolves against the **scanned repo's** virtualenv (in-repo `.venv`/`venv`/`env`, or `--venv`), found **statically** — `site-packages` + `.pth` editable-install paths, never executing the repo's interpreter (so not Jedi's `environment_path`). sys.path = Ravel's stdlib + the target's deps only; Ravel's own `site-packages` no longer leaks in. The env used is shown in the CLI and JSON.
 
 **Port from reference:**
 - 🚧 `reference/Arcflow/js/analysis/parser-routes.js` → Python entry-point detection. **FastAPI/Flask `@app.get`/`@router.*`/`@app.route(..., methods=[...])` done** (`ravel/graph/entrypoints.py`, tree-sitter AST). **Django `urlpatterns` ✅** — route calls inside `urlpatterns` found structurally, views resolved by reference with Jedi; `X.as_view()` marks the class + its HTTP-verb methods; `include()` skipped; wrapper calls unwrapped; unresolvable views logged as warnings. `authProtected` regex **deliberately not ported** → all HTTP routes stay `untrusted`; auth ≠ trusted input (§6).
@@ -69,7 +70,16 @@ This is where Ravel beats Arcflow.
 - ✅ `getParserProvenance` idea → parser provenance surfaced (`PROVENANCE`, coverage metric).
 - **Reference only (do not port as-is):** `parser-callgraph.js`, `graph-builder.js` call-linking — heuristic; we resolve properly instead.
 
-**🚩 Checkpoint (§10) — ⬜ NOT YET RUN:** call graph correct on **~20 hand-checked cases**, coverage **≥80%**. If not — stop everything and fix. All downstream value depends on graph quality. (Current: exact on the FastAPI/Flask fixtures, but no real benchmark repo hand-checked yet. Coverage is 76.9% on sample_app and 25% on django_app — **every** miss is a third-party symbol Jedi can't see because the fixture's deps aren't installed in Ravel's env. The gate is meaningless until Jedi resolves against the *scanned* repo's environment.)
+**🚩 Checkpoint (§10) — ✅ PASSED (2026-09-27), narrowly:** call graph correct on **~20 hand-checked cases**, coverage **≥80%**.
+- Fixture: `eval/fixtures/flaskr` — Flask's tutorial app, vendored unmodified at pallets/flask `d73fa1c` (BSD-3). Ground truth: `eval/ground_truth/flaskr_graph.toml` — 35 exhaustive in-repo `calls` edges + 4 wrong-target traps + 2 must-stay-`unknown` calls.
+- Result (`uv run python -m eval.graph_checkpoint --venv <venv with flask + pytest>`): **42/42 cases, edge precision 100%, edge recall 100%, coverage 81.6%** (151/185). `tests/test_graph_checkpoint.py` locks the cases in CI; the coverage half needs the venv, so it's a manual run.
+- Two resolver bugs the checkpoint caught, both fixed: (1) a call through a parameter or local alias (`cb()`, `f = helper; f()`) was drawn as an edge to the *enclosing* function — now Jedi `infer`s the bound value, else `unknown`; (2) reusing one `jedi.Script` per file made later pytest-fixture calls silently fail to resolve (order-dependent) — now a fresh Script per site (61.6% → 80.8%).
+- Caveats: one small fixture; 0.8 pts above the gate; the remaining 34 misses are sqlite calls through Flask's dynamic `g.db` and untyped test-client chains. 12 edges were added to the ground truth *after* the first run (11 pytest-fixture calls; 1 decorator application, confirmed by PyCG's convention and the dynamic oracle — both flagged in the file) — **an independent re-check of the ground truth is still wanted** (§6: don't mark your own homework). A second, larger real repo should be added before Phase 3 leans on this.
+
+**External graph checks (from `research/`, items 1.1 · 1.2 · 1.4):**
+- ✅ **PyCG micro-benchmark** (`eval/pycg_bench.py`; 119 published ground-truth programs, vendored Apache-2.0 at `eval/benchmarks/pycg`): **precision 98.3%, recall 71.2%**, 73/119 exact. Every miss is classified `no_node` (7, lambdas) / `unknown` (47, flagged) / **`silent` (16, the §6 failure mode)**. `tests/test_pycg_bench.py` ratchets these floors. The benchmark drove three resolver fixes: bare `@decorator` application and `raise Cls` are now call sites, and `eval`/`exec` calls are `unknown` (silent 30 → 16, recall 65.8% → 71.2%). Remaining silent misses: implicit `__iter__`/`__next__` from `for` loops (8), decorator-replaced functions (3), lambda bodies (2), Jedi's non-C3 MRO on diamond inheritance (2), 1 kwargs default.
+- ✅ **Dynamic-oracle recall** (`eval/dynamic_recall.py` + `eval/oracle/trace_calls.py`; Sui et al.): runs flaskr's own tests on a throwaway copy, records the repo-internal calls that actually happen, and scores the static graph against them. **39 observed, 35 recovered: 89.7%.** Misses: 3 × `wrapped_view → view` (flagged `unknown`), 1 test-only monkeypatch. Eval-only: the product never executes scanned code.
+- ⬜ JARVIS FastAPI macro ground truth (1.3; licence unclear), DyPyBench recall repos (1.5), Pysa entry-point cross-check (1.6).
 
 ---
 
