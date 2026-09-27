@@ -25,7 +25,9 @@ offsets — identical for ASCII source; a known v1 caveat for non-ASCII.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -203,8 +205,16 @@ def _infer(script: Any, site: CallSite, rel_path: str) -> list[Any]:
         return []
 
 
-def _target(script: Any, site: CallSite, rel_path: str, root: Path) -> Any | None:
+def _target(
+    make_script: Callable[[], Any], site: CallSite, rel_path: str, root: Path
+) -> Any | None:
     """The definition a call/base site refers to, or None if it can't be known.
+
+    Each site gets a **fresh** ``jedi.Script``. A reused one carries inference
+    state between queries, and Jedi then refuses to redo some inferences
+    (pytest fixture parameters resolve for the first call site in a file and
+    come back empty for the rest). Resolution must not depend on which other
+    sites were queried first — or on unrelated code above the call.
 
     ``goto`` on a name bound by a parameter or an assignment stops at that
     binding (``cb`` in ``def f(cb): cb()``; ``g`` in ``g = helper; g()``) —
@@ -214,6 +224,7 @@ def _target(script: Any, site: CallSite, rel_path: str, root: Path) -> Any | Non
     confident edge to whichever function merely contains it. An external
     binding stays attributed to its package, as before.
     """
+    script = make_script()
     defs = _goto(script, site, rel_path)
     if not defs:
         return None
@@ -324,7 +335,7 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
     cov = Coverage()
 
     for source in files:
-        script = jedi.Script(code=source.content, path=str(source.path), project=project)
+        script = partial(jedi.Script, code=source.content, path=str(source.path), project=project)
         local_nodes = nodes_by_file[source.rel_path]
         for site in _call_sites(source):
             cov.total += 1
@@ -429,7 +440,7 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
 
 
 def _django_entrypoints(
-    script: Any,
+    script: Callable[[], Any],
     ref: ViewRef,
     rel_path: str,
     root: Path,
