@@ -1,0 +1,125 @@
+"""Finding normalization onto graph nodes + dedupe (Phase 2), on real fixtures.
+
+flaskr (the Flask tutorial) and the Django fixture give real Bandit output:
+function-level findings, a finding on a ``def`` line, repeated asserts in one
+test function, and a module-level ``SECRET_KEY``.
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import pytest
+from ravel.models import FindingSource, NodeKind
+from ravel.scanners.base import RawFinding, ScanStatus, Severity
+from ravel.scanners.normalize import (
+    LocatedFinding,
+    cross_scanner_duplicates,
+    dedupe,
+    normalize,
+)
+from ravel.scanners.run import NOT_YET_INTEGRATED, ScanReport, scan_repo
+
+FIXTURES = Path(__file__).parent.parent / "eval" / "fixtures"
+FLASKR = FIXTURES / "flaskr"
+DJANGO = FIXTURES / "django_app"
+
+
+@pytest.fixture(scope="module")
+def flaskr() -> ScanReport:
+    return scan_repo(FLASKR)
+
+
+def _by_rule_line(report: ScanReport) -> dict[tuple[str, str, int], LocatedFinding]:
+    return {(f.raw.rel_path, f.finding.rule_id, f.raw.line): f for f in report.findings}
+
+
+def test_bandit_runs_and_reports_its_version(flaskr: ScanReport) -> None:
+    (result,) = flaskr.results
+    assert result.source is FindingSource.BANDIT
+    assert result.status is ScanStatus.OK
+    assert result.version
+    assert len(result.findings) == len(flaskr.findings) > 0
+
+
+def test_unintegrated_scanners_are_reported_not_hidden(flaskr: ScanReport) -> None:
+    assert set(flaskr.not_integrated) == set(NOT_YET_INTEGRATED)
+    assert FindingSource.BANDIT not in flaskr.not_integrated
+
+
+def test_every_finding_maps_to_a_node(flaskr: ScanReport) -> None:
+    assert flaskr.mapping.total == len(flaskr.findings)
+    assert flaskr.mapping.unmapped == 0
+    assert flaskr.mapping.ratio == 1.0
+
+
+def test_findings_anchor_on_the_innermost_def(flaskr: ScanReport) -> None:
+    found = _by_rule_line(flaskr)
+    # Hard-coded default password on a `def` line → that method, not its class.
+    login = found[("tests/conftest.py", "B107", 51)]
+    assert login.node.qualified_name == "AuthActions.login"
+    assert login.finding.cwe == "CWE-259"
+    # A keyword argument inside create_app's body.
+    assert found[("flaskr/__init__.py", "B106", 11)].node.qualified_name == "create_app"
+    assert all(f.finding.node_id == f.node.id for f in flaskr.findings)
+
+
+def test_module_level_finding_anchors_on_the_file_node() -> None:
+    report = scan_repo(DJANGO)
+    secret = next(f for f in report.findings if f.finding.rule_id == "B105")
+    assert secret.raw.rel_path == "mysite/settings.py"
+    assert secret.node.kind is NodeKind.FILE
+    assert report.mapping.to_file >= 1
+
+
+def test_ids_are_unique_even_for_repeated_identical_lines(flaskr: ScanReport) -> None:
+    ids = [f.finding.id for f in flaskr.findings]
+    assert len(ids) == len(set(ids))
+
+
+def test_ids_survive_code_moving_but_change_with_the_code(tmp_path: Path) -> None:
+    repo = tmp_path / "flaskr"
+    shutil.copytree(FLASKR, repo)
+    before = {
+        f.finding.id for f in scan_repo(repo).findings if f.raw.rel_path == "tests/conftest.py"
+    }
+
+    conftest = repo / "tests" / "conftest.py"
+    original = conftest.read_text(encoding="utf-8")
+    conftest.write_text("\n\n\n" + original, encoding="utf-8")  # shift every line down
+    moved = {
+        f.finding.id for f in scan_repo(repo).findings if f.raw.rel_path == "tests/conftest.py"
+    }
+    assert moved == before  # content hash, not line number (PRODUCT.md §6)
+
+    conftest.write_text(original.replace('password="test"', 'password="changed"'), encoding="utf-8")
+    edited = {
+        f.finding.id for f in scan_repo(repo).findings if f.raw.rel_path == "tests/conftest.py"
+    }
+    assert edited != before  # the flagged code changed, so its id must too
+
+
+def test_cross_scanner_duplicates_are_grouped_not_dropped(flaskr: ScanReport) -> None:
+    b107 = next(f for f in flaskr.findings if f.finding.rule_id == "B107")
+    semgrep_twin = RawFinding(
+        source=FindingSource.SEMGREP,
+        rule_id="python.lang.security.hardcoded-password-default-argument",
+        rel_path=b107.raw.rel_path,
+        line=b107.raw.line,
+        end_line=b107.raw.line,
+        raw_severity="WARNING",
+        severity=Severity.MEDIUM,
+        confidence=None,
+        cwe="CWE-259",
+        message="hard-coded password default",
+    )
+    findings, _ = normalize([b107.raw, semgrep_twin], flaskr.graph.nodes, FLASKR)
+    groups = dedupe(findings)
+    assert len(findings) == 2  # both kept in the report
+    assert cross_scanner_duplicates(groups) == 1  # but counted once for scoring
+
+
+def test_same_scanner_on_different_lines_is_not_a_duplicate(flaskr: ScanReport) -> None:
+    # Many B101 asserts in one test function: distinct lines, distinct findings.
+    assert cross_scanner_duplicates(flaskr.groups) == 0
