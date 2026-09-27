@@ -1,0 +1,252 @@
+# Phase 1 checkpoint — hand-checked call graph for eval/fixtures/flaskr
+# (pallets/flask examples/tutorial @ d73fa1cdcbd8b1465c151db8924ba58b1dd14e35).
+#
+# Written by reading the source, *before* running Ravel on it. Functions are
+# named "file::qualified_name" (the qualified name as Ravel's parser builds it).
+#
+# Revision (2026-09-27), made AFTER the first run — flagged so reviewers can
+# weigh it: the 11 `auth.login()` / `auth.logout()` edges under "pytest
+# fixtures" below were first recorded as unknowable. They are real: each test
+# takes the `auth` fixture, which returns `AuthActions(client)` (conftest.py:61),
+# and Jedi follows pytest fixture injection. Each edge was re-verified against
+# its source line. An independent re-check of this file is still wanted.
+#
+# [[edge]]     — an in-repo call that MUST resolve to a `calls` edge.
+#                The list is EXHAUSTIVE: every call from repo code to a repo
+#                function/class is here, so any other resolved internal edge
+#                Ravel emits is a false positive (edge precision).
+# [[no_edge]]  — a call that looks like an in-repo call by name but is not
+#                statically resolvable (or is not a call at all). Ravel must
+#                NOT draw this edge; where `unknown` is set, the call site must
+#                instead survive as an `unknown::<name>` edge (PRODUCT.md §6).
+# [[unknown]]  — a dynamic call with no plausible static target: it must be
+#                kept as an `unknown::<name>` edge from `src`, never dropped.
+
+# ---------------------------------------------------------------- flaskr/
+
+[[edge]]
+src = "flaskr/__init__.py::create_app"
+dst = "flaskr/db.py::init_app"
+line = 33
+note = "db.init_app(app) — module imported inside the function body (from . import db)"
+
+[[edge]]
+src = "flaskr/db.py::init_db"
+dst = "flaskr/db.py::get_db"
+line = 35
+
+[[edge]]
+src = "flaskr/db.py::init_db_command"
+dst = "flaskr/db.py::init_db"
+line = 44
+note = "call inside a click-decorated command"
+
+[[edge]]
+src = "flaskr/auth.py::load_logged_in_user"
+dst = "flaskr/db.py::get_db"
+line = 42
+note = "get_db().execute(...) chained; imported via from .db import get_db"
+
+[[edge]]
+src = "flaskr/auth.py::register"
+dst = "flaskr/db.py::get_db"
+line = 56
+
+[[edge]]
+src = "flaskr/auth.py::login"
+dst = "flaskr/db.py::get_db"
+line = 90
+
+[[edge]]
+src = "flaskr/blog.py::index"
+dst = "flaskr/db.py::get_db"
+line = 19
+
+[[edge]]
+src = "flaskr/blog.py::get_post"
+dst = "flaskr/db.py::get_db"
+line = 41
+note = "callee on its own line in a parenthesised method chain"
+
+[[edge]]
+src = "flaskr/blog.py::create"
+dst = "flaskr/db.py::get_db"
+line = 75
+note = "view wrapped by @login_required"
+
+[[edge]]
+src = "flaskr/blog.py::update"
+dst = "flaskr/blog.py::get_post"
+line = 90
+
+[[edge]]
+src = "flaskr/blog.py::update"
+dst = "flaskr/db.py::get_db"
+line = 103
+
+[[edge]]
+src = "flaskr/blog.py::delete"
+dst = "flaskr/blog.py::get_post"
+line = 121
+
+[[edge]]
+src = "flaskr/blog.py::delete"
+dst = "flaskr/db.py::get_db"
+line = 122
+
+# ---------------------------------------------------------------- tests/
+
+[[edge]]
+src = "tests/conftest.py::app"
+dst = "flaskr/__init__.py::create_app"
+line = 21
+note = "absolute import from the package: from flaskr import create_app"
+
+[[edge]]
+src = "tests/conftest.py::app"
+dst = "flaskr/db.py::init_db"
+line = 25
+
+[[edge]]
+src = "tests/conftest.py::app"
+dst = "flaskr/db.py::get_db"
+line = 26
+
+[[edge]]
+src = "tests/conftest.py::auth"
+dst = "tests/conftest.py::AuthActions"
+line = 61
+note = "constructor call -> class node"
+
+[[edge]]
+src = "tests/test_auth.py::test_register"
+dst = "flaskr/db.py::get_db"
+line = 19
+
+[[edge]]
+src = "tests/test_blog.py::test_author_required"
+dst = "flaskr/db.py::get_db"
+line = 28
+
+[[edge]]
+src = "tests/test_blog.py::test_create"
+dst = "flaskr/db.py::get_db"
+line = 52
+
+[[edge]]
+src = "tests/test_blog.py::test_update"
+dst = "flaskr/db.py::get_db"
+line = 63
+
+[[edge]]
+src = "tests/test_blog.py::test_delete"
+dst = "flaskr/db.py::get_db"
+line = 81
+
+[[edge]]
+src = "tests/test_db.py::test_get_close_db"
+dst = "flaskr/db.py::get_db"
+line = 10
+note = "called twice (lines 10, 11) — one edge"
+
+[[edge]]
+src = "tests/test_factory.py::test_config"
+dst = "flaskr/__init__.py::create_app"
+line = 6
+note = "called twice (lines 6, 7) — one edge"
+
+# ------------------------------------------- tests/ — pytest fixtures
+# `auth` param -> conftest `auth` fixture -> AuthActions(client).
+
+[[edge]]
+src = "tests/test_auth.py::test_login"
+dst = "tests/conftest.py::AuthActions.login"
+line = 44
+
+[[edge]]
+src = "tests/test_auth.py::test_login_validate_input"
+dst = "tests/conftest.py::AuthActions.login"
+line = 60
+
+[[edge]]
+src = "tests/test_auth.py::test_logout"
+dst = "tests/conftest.py::AuthActions.login"
+line = 65
+
+[[edge]]
+src = "tests/test_auth.py::test_logout"
+dst = "tests/conftest.py::AuthActions.logout"
+line = 68
+
+[[edge]]
+src = "tests/test_blog.py::test_index"
+dst = "tests/conftest.py::AuthActions.login"
+line = 11
+
+[[edge]]
+src = "tests/test_blog.py::test_author_required"
+dst = "tests/conftest.py::AuthActions.login"
+line = 32
+
+[[edge]]
+src = "tests/test_blog.py::test_exists_required"
+dst = "tests/conftest.py::AuthActions.login"
+line = 42
+
+[[edge]]
+src = "tests/test_blog.py::test_create"
+dst = "tests/conftest.py::AuthActions.login"
+line = 47
+
+[[edge]]
+src = "tests/test_blog.py::test_update"
+dst = "tests/conftest.py::AuthActions.login"
+line = 58
+
+[[edge]]
+src = "tests/test_blog.py::test_create_update_validate"
+dst = "tests/conftest.py::AuthActions.login"
+line = 70
+
+[[edge]]
+src = "tests/test_blog.py::test_delete"
+dst = "tests/conftest.py::AuthActions.login"
+line = 76
+
+# ---------------------------------------------------------------- negatives
+
+[[unknown]]
+src = "flaskr/auth.py::login_required.wrapped_view"
+name = "view"
+line = 27
+note = "view(**kwargs) calls a decorator parameter — dynamic, must stay unknown"
+
+[[unknown]]
+src = "tests/conftest.py::AuthActions.login"
+name = "post"
+line = 52
+note = "self._client is an untyped constructor argument — unresolvable, never dropped"
+
+[[no_edge]]
+src = "tests/test_auth.py::test_login"
+dst = "flaskr/auth.py::login"
+line = 44
+note = "auth.login() is AuthActions.login via the fixture, NOT the flaskr login view; a name heuristic links these wrongly"
+
+[[no_edge]]
+src = "tests/test_auth.py::test_logout"
+dst = "flaskr/auth.py::logout"
+line = 68
+note = "auth.logout() is AuthActions.logout via the fixture, NOT the flaskr logout view"
+
+[[no_edge]]
+src = "flaskr/db.py::init_app"
+dst = "flaskr/db.py::close_db"
+line = 55
+note = "close_db is passed as a callback, not called"
+
+[[no_edge]]
+src = "flaskr/db.py::init_app"
+dst = "flaskr/db.py::init_db_command"
+line = 56
+note = "init_db_command is passed to add_command, not called"

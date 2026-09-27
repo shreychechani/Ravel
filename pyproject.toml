@@ -43,7 +43,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["ravel", "tests"]
+files = ["ravel", "tests", "eval/graph_checkpoint.py"]
 
 # jedi ships no py.typed marker; networkx stubs are third-party and partial.
 [[tool.mypy.overrides]]
