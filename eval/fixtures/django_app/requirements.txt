@@ -1,0 +1,7 @@
+# pip freeze of this app's environment as of April 2021 (Django 3.2 LTS, first release).
+# Pinned deliberately: these versions have published advisories, so the OSV
+# scanner has real dependency findings to report. Do not upgrade.
+asgiref==3.3.4
+Django==3.2
+pytz==2021.1
+sqlparse==0.4.1
