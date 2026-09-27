@@ -170,14 +170,14 @@ def scan(
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--venv") from exc
 
-    scanners = Table(title=f"Ravel scan — {path}")
-    scanners.add_column("scanner", style="cyan")
-    scanners.add_column("status")
-    scanners.add_column("version")
-    scanners.add_column("findings", justify="right")
+    status_table = Table(title=f"Ravel scan — {path}")
+    status_table.add_column("scanner", style="cyan")
+    status_table.add_column("status")
+    status_table.add_column("version")
+    status_table.add_column("findings", justify="right")
     for r in report.results:
         style = "green" if r.status is ScanStatus.OK else "red"
-        scanners.add_row(
+        status_table.add_row(
             r.source.value,
             f"[{style}]{r.status.value}[/{style}]",
             r.version or "-",
@@ -185,8 +185,8 @@ def scan(
         )
     for missing in report.not_integrated:
         # Never imply full coverage: a scanner we don't run is recall we don't have.
-        scanners.add_row(missing.value, "[yellow]not integrated yet[/yellow]", "-", "-")
-    console.print(scanners)
+        status_table.add_row(missing.value, "[yellow]not integrated yet[/yellow]", "-", "-")
+    console.print(status_table)
 
     m = report.mapping
     style = "green" if m.ratio >= 0.95 else "yellow"
@@ -198,6 +198,7 @@ def scan(
     summary.add_row("  ├─ function / class", str(m.to_def))
     summary.add_row("  ├─ module level (file node)", str(m.to_file))
     summary.add_row("  └─ unmapped", str(m.unmapped))
+    summary.add_row("Non-Python files (no node; outside the rate)", str(m.non_python))
     summary.add_row("Cross-scanner duplicates", str(cross_scanner_duplicates(report.groups)))
     cov = report.graph.coverage.ratio
     # <60% coverage invalidates reachability claims built on this graph (PRODUCT.md §9).
@@ -220,7 +221,7 @@ def scan(
                 lf.raw.severity.value,
                 lf.finding.cwe or "-",
                 f"{lf.raw.rel_path}:{lf.raw.line}",
-                lf.node.qualified_name,
+                lf.node.qualified_name if lf.node else "[dim](non-Python file)[/dim]",
             )
         console.print(table)
 
@@ -241,6 +242,7 @@ def scan(
                 "to_def": m.to_def,
                 "to_file": m.to_file,
                 "unmapped": m.unmapped,
+                "non_python": m.non_python,
                 "ratio": m.ratio,
             },
             "findings": [

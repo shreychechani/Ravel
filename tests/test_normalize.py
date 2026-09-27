@@ -58,18 +58,20 @@ def test_findings_anchor_on_the_innermost_def(flaskr: ScanReport) -> None:
     found = _by_rule_line(flaskr)
     # Hard-coded default password on a `def` line → that method, not its class.
     login = found[("tests/conftest.py", "B107", 51)]
+    assert login.node is not None
     assert login.node.qualified_name == "AuthActions.login"
     assert login.finding.cwe == "CWE-259"
     # A keyword argument inside create_app's body.
-    assert found[("flaskr/__init__.py", "B106", 11)].node.qualified_name == "create_app"
-    assert all(f.finding.node_id == f.node.id for f in flaskr.findings)
+    create_app = found[("flaskr/__init__.py", "B106", 11)].node
+    assert create_app is not None and create_app.qualified_name == "create_app"
+    assert all(f.node is not None and f.finding.node_id == f.node.id for f in flaskr.findings)
 
 
 def test_module_level_finding_anchors_on_the_file_node() -> None:
     report = scan_repo(DJANGO)
     secret = next(f for f in report.findings if f.finding.rule_id == "B105")
     assert secret.raw.rel_path == "mysite/settings.py"
-    assert secret.node.kind is NodeKind.FILE
+    assert secret.node is not None and secret.node.kind is NodeKind.FILE
     assert report.mapping.to_file >= 1
 
 
@@ -123,3 +125,35 @@ def test_cross_scanner_duplicates_are_grouped_not_dropped(flaskr: ScanReport) ->
 def test_same_scanner_on_different_lines_is_not_a_duplicate(flaskr: ScanReport) -> None:
     # Many B101 asserts in one test function: distinct lines, distinct findings.
     assert cross_scanner_duplicates(flaskr.groups) == 0
+
+
+def test_non_python_findings_are_kept_but_outside_the_mapping_rate(flaskr: ScanReport) -> None:
+    def template(path: str, line: int) -> RawFinding:
+        return RawFinding(
+            source=FindingSource.SEMGREP,
+            rule_id="python.django.security.django-no-csrf-token",
+            rel_path=path,
+            line=line,
+            end_line=line,
+            raw_severity="WARNING",
+            severity=Severity.MEDIUM,
+            confidence="MEDIUM",
+            cwe="CWE-352",
+            message="form without csrf token",
+        )
+
+    raws = [
+        template("flaskr/templates/auth/login.html", 8),
+        template("flaskr/templates/auth/register.html", 8),  # same line, other file
+        flaskr.findings[0].raw,
+    ]
+    findings, stats = normalize(raws, flaskr.graph.nodes, FLASKR)
+    assert len(findings) == 3
+    assert stats.non_python == 2
+    assert stats.unmapped == 0
+    assert stats.ratio == 1.0  # the one Python finding mapped
+    assert [f.node for f in findings if f.raw.rel_path.endswith(".html")] == [None, None]
+    assert len({f.finding.id for f in findings}) == 3
+    # Same line + CWE in two different templates must not collapse into one group.
+    assert cross_scanner_duplicates(dedupe(findings)) == 0
+    assert len(dedupe(findings)) == 3
