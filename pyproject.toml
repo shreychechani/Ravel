@@ -36,6 +36,8 @@ packages = ["ravel"]
 [tool.ruff]
 line-length = 100
 src = ["ravel", "tests"]
+# Vendored third-party code, kept byte-identical to upstream.
+extend-exclude = ["eval/benchmarks", "eval/fixtures/flaskr"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
