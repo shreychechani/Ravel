@@ -1,8 +1,8 @@
 """``ravel`` CLI.
 
-v1 slice: ``ravel index PATH`` reads a Python repo and extracts the
-function/class nodes, printing a summary. Later phases add graph edges,
-scanners, reachability, and triage.
+``ravel index PATH`` builds the call graph and reports coverage.
+``ravel scan PATH`` runs the security scanners and anchors every finding on a
+graph node. Later phases add reachability and triage.
 """
 
 from __future__ import annotations
@@ -19,6 +19,9 @@ from ravel.core.logging import configure_logging, get_logger
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
 from ravel.models import EdgeKind, NodeKind
+from ravel.scanners.base import ScanStatus
+from ravel.scanners.normalize import cross_scanner_duplicates
+from ravel.scanners.run import scan_repo
 
 app = typer.Typer(add_completion=False, help="Ravel — reachability-aware security triage.")
 console = Console()
@@ -132,6 +135,129 @@ def index(
         }
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote graph (%d nodes, %d edges) to %s", len(nodes), len(result.edges), json_out)
+
+
+_PathArg = Annotated[
+    Path,
+    typer.Argument(
+        exists=True, file_okay=False, dir_okay=True, readable=True, help="Path to a Python repo."
+    ),
+]
+_VenvOpt = Annotated[
+    Path | None,
+    typer.Option(
+        "--venv",
+        exists=True,
+        file_okay=False,
+        help="The repo's virtualenv, if not at PATH/.venv, venv or env. Read, never run.",
+    ),
+]
+
+
+@app.command()
+def scan(
+    path: _PathArg,
+    venv: _VenvOpt = None,
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write normalized findings to this JSON file.")
+    ] = None,
+    limit: Annotated[int, typer.Option(help="Max findings to list (0 = all).")] = 50,
+) -> None:
+    """Run the security scanners and anchor each finding on a graph node."""
+    configure_logging()
+    try:
+        report = scan_repo(path, venv=venv)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--venv") from exc
+
+    scanners = Table(title=f"Ravel scan — {path}")
+    scanners.add_column("scanner", style="cyan")
+    scanners.add_column("status")
+    scanners.add_column("version")
+    scanners.add_column("findings", justify="right")
+    for r in report.results:
+        style = "green" if r.status is ScanStatus.OK else "red"
+        scanners.add_row(
+            r.source.value,
+            f"[{style}]{r.status.value}[/{style}]",
+            r.version or "-",
+            str(len(r.findings)),
+        )
+    for missing in report.not_integrated:
+        # Never imply full coverage: a scanner we don't run is recall we don't have.
+        scanners.add_row(missing.value, "[yellow]not integrated yet[/yellow]", "-", "-")
+    console.print(scanners)
+
+    m = report.mapping
+    style = "green" if m.ratio >= 0.95 else "yellow"
+    summary = Table(title="Findings")
+    summary.add_column("metric", style="cyan")
+    summary.add_column("value", justify="right")
+    summary.add_row("Findings", str(m.total))
+    summary.add_row("Mapped to a node (gate ≥95%)", f"[{style}]{m.ratio:.1%}[/{style}]")
+    summary.add_row("  ├─ function / class", str(m.to_def))
+    summary.add_row("  ├─ module level (file node)", str(m.to_file))
+    summary.add_row("  └─ unmapped", str(m.unmapped))
+    summary.add_row("Cross-scanner duplicates", str(cross_scanner_duplicates(report.groups)))
+    cov = report.graph.coverage.ratio
+    # <60% coverage invalidates reachability claims built on this graph (PRODUCT.md §9).
+    cov_style = "green" if cov >= 0.80 else "yellow" if cov >= 0.60 else "red"
+    summary.add_row("Graph coverage", f"[{cov_style}]{cov:.1%}[/{cov_style}]")
+    summary.add_row("Python env", report.graph.environment.describe())
+    console.print(summary)
+
+    shown = report.findings if limit == 0 else report.findings[:limit]
+    if shown:
+        table = Table(title=f"Findings ({len(shown)} of {len(report.findings)})")
+        table.add_column("rule", style="cyan")
+        table.add_column("sev")
+        table.add_column("cwe")
+        table.add_column("location")
+        table.add_column("node")
+        for lf in shown:
+            table.add_row(
+                lf.finding.rule_id,
+                lf.raw.severity.value,
+                lf.finding.cwe or "-",
+                f"{lf.raw.rel_path}:{lf.raw.line}",
+                lf.node.qualified_name,
+            )
+        console.print(table)
+
+    if json_out is not None:
+        payload = {
+            "scanners": [
+                {
+                    "source": r.source.value,
+                    "status": r.status.value,
+                    "version": r.version,
+                    "errors": r.errors,
+                }
+                for r in report.results
+            ],
+            "not_integrated": [s.value for s in report.not_integrated],
+            "mapping": {
+                "total": m.total,
+                "to_def": m.to_def,
+                "to_file": m.to_file,
+                "unmapped": m.unmapped,
+                "ratio": m.ratio,
+            },
+            "findings": [
+                {
+                    **lf.finding.model_dump(),
+                    "file": lf.raw.rel_path,
+                    "line": lf.raw.line,
+                    "end_line": lf.raw.end_line,
+                    "severity": lf.raw.severity.value,
+                    "confidence": lf.raw.confidence,
+                    "message": lf.raw.message,
+                }
+                for lf in report.findings
+            ],
+        }
+        json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        log.info("Wrote %d findings to %s", len(report.findings), json_out)
 
 
 def run() -> None:
