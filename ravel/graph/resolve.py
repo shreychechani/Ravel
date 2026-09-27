@@ -57,6 +57,8 @@ from ravel.models import (
 log = get_logger("ravel.graph.resolve")
 
 _CALLABLE_KINDS = {NodeKind.FUNCTION, NodeKind.CLASS}
+_CALLABLE_TYPES = {"function", "class"}  # Jedi definition types that are callees
+_BINDING_TYPES = {"param", "statement"}  # a name binding, not the callee itself
 
 
 @dataclass(frozen=True)
@@ -193,6 +195,38 @@ def _goto(script: Any, site: CallSite, rel_path: str) -> list[Any]:
         return []
 
 
+def _infer(script: Any, site: CallSite, rel_path: str) -> list[Any]:
+    try:
+        return list(script.infer(site.line, site.col))
+    except Exception as exc:
+        log.debug("jedi infer failed at %s:%d: %s", rel_path, site.line, exc)
+        return []
+
+
+def _target(script: Any, site: CallSite, rel_path: str, root: Path) -> Any | None:
+    """The definition a call/base site refers to, or None if it can't be known.
+
+    ``goto`` on a name bound by a parameter or an assignment stops at that
+    binding (``cb`` in ``def f(cb): cb()``; ``g`` in ``g = helper; g()``) —
+    not a callee. We then ask Jedi what *value* the name holds. If it can't
+    say and the binding is in-repo, the call is genuinely dynamic and must be
+    ``unknown``: mapping the binding's line back to a node would draw a
+    confident edge to whichever function merely contains it. An external
+    binding stays attributed to its package, as before.
+    """
+    defs = _goto(script, site, rel_path)
+    if not defs:
+        return None
+    definition = defs[0]
+    if definition.type in _BINDING_TYPES:
+        inferred = [d for d in _infer(script, site, rel_path) if d.type in _CALLABLE_TYPES]
+        if inferred:
+            return inferred[0]
+        if _relpath(definition.module_path, root) is not None:
+            return None
+    return definition
+
+
 def _file_node(source: SourceFile) -> Node:
     """A FILE node so module-level call sites (decorators, ``x = f()``) have a home."""
     module = source.rel_path[:-3] if source.rel_path.endswith(".py") else source.rel_path
@@ -223,12 +257,23 @@ def _enclosing(nodes: list[Node], line: int, kinds: set[NodeKind]) -> Node | Non
     return best
 
 
-def _def_node(nodes: list[Node], line: int) -> Node | None:
-    """Map a Jedi definition line back to our node (its def line == node start)."""
+def _def_node(nodes: list[Node], definition: Any) -> Node | None:
+    """Map a Jedi function/class definition back to our node.
+
+    Both sides use the ``def``/``class`` line, so the match is exact on line
+    and name. Anything else (a module, a variable) has no node — never fall
+    back to the enclosing def, which would invent an edge to the container.
+    """
+    if definition.type not in _CALLABLE_TYPES:
+        return None
     for n in nodes:
-        if n.start_line == line and n.kind in _CALLABLE_KINDS:
+        if (
+            n.kind in _CALLABLE_KINDS
+            and n.start_line == definition.line
+            and n.qualified_name.rsplit(".", 1)[-1] == definition.name
+        ):
             return n
-    return _enclosing(nodes, line, _CALLABLE_KINDS)
+    return None
 
 
 def _relpath(module_path: Any, root: Path) -> str | None:
@@ -292,15 +337,14 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
 
-            defs = _goto(script, site, source.rel_path)
-            if not defs:
+            definition = _target(script, site, source.rel_path, root)
+            if definition is None:
                 _add_unknown(edges, cov, src_node, site.name)
                 continue
 
-            definition = defs[0]
             rel = _relpath(definition.module_path, root)
             if rel is not None and rel in nodes_by_file:
-                dst = _def_node(nodes_by_file[rel], definition.line or 0)
+                dst = _def_node(nodes_by_file[rel], definition)
                 if dst is not None:
                     cov.internal += 1
                     edges.append(Edge(src_id=src_node.id, dst_id=dst.id, kind=EdgeKind.CALLS))
@@ -330,8 +374,8 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
             )
             if cls is None:
                 continue
-            defs = _goto(script, base, source.rel_path) if base.col >= 0 else []
-            if not defs:
+            definition = _target(script, base, source.rel_path, root) if base.col >= 0 else None
+            if definition is None:
                 edges.append(
                     Edge(
                         src_id=cls.id,
@@ -341,10 +385,9 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
                     )
                 )
                 continue
-            definition = defs[0]
             rel = _relpath(definition.module_path, root)
             if rel is not None and rel in nodes_by_file:
-                dst = _def_node(nodes_by_file[rel], definition.line or 0)
+                dst = _def_node(nodes_by_file[rel], definition)
                 if dst is not None and dst.kind is NodeKind.CLASS:
                     edges.append(Edge(src_id=cls.id, dst_id=dst.id, kind=EdgeKind.INHERITS))
                 continue
@@ -401,8 +444,8 @@ def _django_entrypoints(
     resolve at all is logged loudly: it is an entry point we'd otherwise lose.
     """
     site = CallSite(ref.line, ref.col, ref.name)
-    defs = _goto(script, site, rel_path)
-    if not defs:
+    definition = _target(script, site, rel_path, root)
+    if definition is None:
         log.warning(
             "django view %r (route %r) at %s:%d could not be resolved — not an entry point",
             ref.name,
@@ -411,11 +454,10 @@ def _django_entrypoints(
             ref.line,
         )
         return []
-    definition = defs[0]
     rel = _relpath(definition.module_path, root)
     if rel is None or rel not in nodes_by_file:
         return []  # a third-party view — no in-repo node to seed from
-    view = _def_node(nodes_by_file[rel], definition.line or 0)
+    view = _def_node(nodes_by_file[rel], definition)
     if view is None:
         return []
 
