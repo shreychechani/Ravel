@@ -21,7 +21,7 @@ from ravel.graph.resolve import build_graph
 from ravel.models import EdgeKind, NodeKind
 from ravel.scanners.base import ScanStatus
 from ravel.scanners.normalize import cross_scanner_duplicates
-from ravel.scanners.run import scan_repo
+from ravel.scanners.run import default_scanners, scan_repo
 
 app = typer.Typer(add_completion=False, help="Ravel — reachability-aware security triage.")
 console = Console()
@@ -162,11 +162,25 @@ def scan(
         Path | None, typer.Option("--json", help="Write normalized findings to this JSON file.")
     ] = None,
     limit: Annotated[int, typer.Option(help="Max findings to list (0 = all).")] = 50,
+    semgrep_config: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--semgrep-config",
+            help="Local Semgrep rules file/dir (repeatable). Registry ids are refused.",
+        ),
+    ] = None,
+    semgrep_bin: Annotated[
+        Path | None, typer.Option("--semgrep-bin", help="Path to the semgrep executable.")
+    ] = None,
 ) -> None:
     """Run the security scanners and anchor each finding on a graph node."""
     configure_logging()
     try:
-        report = scan_repo(path, venv=venv)
+        scanners = default_scanners(semgrep_config, semgrep_bin)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--semgrep-config") from exc
+    try:
+        report = scan_repo(path, venv=venv, scanners=scanners)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--venv") from exc
 
@@ -176,7 +190,7 @@ def scan(
     status_table.add_column("version")
     status_table.add_column("findings", justify="right")
     for r in report.results:
-        style = "green" if r.status is ScanStatus.OK else "red"
+        style = {ScanStatus.OK: "green", ScanStatus.NOT_CONFIGURED: "yellow"}.get(r.status, "red")
         status_table.add_row(
             r.source.value,
             f"[{style}]{r.status.value}[/{style}]",

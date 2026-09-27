@@ -36,11 +36,14 @@ def _by_rule_line(report: ScanReport) -> dict[tuple[str, str, int], LocatedFindi
 
 
 def test_bandit_runs_and_reports_its_version(flaskr: ScanReport) -> None:
-    (result,) = flaskr.results
-    assert result.source is FindingSource.BANDIT
+    result = next(r for r in flaskr.results if r.source is FindingSource.BANDIT)
     assert result.status is ScanStatus.OK
     assert result.version
-    assert len(result.findings) == len(flaskr.findings) > 0
+    assert len(result.findings) > 0
+    # Semgrep always reports a status — here, no rules were supplied.
+    semgrep = next(r for r in flaskr.results if r.source is FindingSource.SEMGREP)
+    assert semgrep.status in {ScanStatus.NOT_INSTALLED, ScanStatus.NOT_CONFIGURED}
+    assert len(flaskr.findings) == sum(len(r.findings) for r in flaskr.results)
 
 
 def test_unintegrated_scanners_are_reported_not_hidden(flaskr: ScanReport) -> None:

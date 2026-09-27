@@ -32,6 +32,7 @@ class Severity(StrEnum):
 class ScanStatus(StrEnum):
     OK = "ok"
     NOT_INSTALLED = "not_installed"
+    NOT_CONFIGURED = "not_configured"  # installed, but needs input Ravel won't invent (rules)
     FAILED = "failed"
 
 
