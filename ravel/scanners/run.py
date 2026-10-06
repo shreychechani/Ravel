@@ -19,6 +19,8 @@ from ravel.scanners.normalize import (
 )
 from ravel.scanners.osv import OsvScanner
 from ravel.scanners.semgrep import SemgrepScanner
+from ravel.triage.ranking import rank_findings
+from ravel.triage.reachability import analyze_reachability
 
 log = get_logger("ravel.scanners.run")
 
@@ -58,7 +60,7 @@ def scan_repo(
     scanners: list[Scanner] | None = None,
     graph: GraphResult | None = None,
 ) -> ScanReport:
-    """Build (or reuse) the graph, run each scanner, normalize and dedupe."""
+    """Build (or reuse) the graph, run each scanner, normalize, reachability filter, and dedupe."""
     root = Path(root).resolve()
     graph = graph or build_graph(root, venv=venv)
     files = sorted({n.file_path for n in graph.nodes if n.kind is NodeKind.FILE})
@@ -78,4 +80,7 @@ def scan_repo(
         len(results),
         mapping.ratio * 100,
     )
+    findings = analyze_reachability(graph, findings)
+    findings = rank_findings(findings)
     return ScanReport(graph, results, findings, mapping, dedupe(findings))
+
