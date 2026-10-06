@@ -81,11 +81,11 @@ def index(
     import_edges = sum(1 for e in result.edges if e.kind is EdgeKind.IMPORTS and e.resolved)
     unknown_imports = sum(1 for e in result.edges if e.kind is EdgeKind.IMPORTS and not e.resolved)
 
-    # Coverage is the Phase 1 gate: ≥80% of call sites resolved (BUILD-PLAN §1).
+    # Coverage is the Phase 1 gate: >=80% of call sites resolved (BUILD-PLAN §1).
     cov_pct = cov.ratio * 100
     cov_style = "green" if cov.ratio >= 0.80 else "yellow"
 
-    table = Table(title=f"Ravel index — {path}")
+    table = Table(title=f"Ravel index - {path}")
     table.add_column("metric", style="cyan")
     table.add_column("value", justify="right", style="green")
     table.add_row("Python files", str(files))
@@ -96,9 +96,9 @@ def index(
     table.add_row("External refs", str(len(result.external_refs)))
     table.add_row("Entry points (untrusted)", str(len(result.entry_points)))
     table.add_row("Call sites", str(cov.total))
-    table.add_row("  ├─ resolved (internal)", str(cov.internal))
-    table.add_row("  ├─ resolved (external)", str(cov.external))
-    table.add_row("  └─ unresolved", str(cov.unresolved))
+    table.add_row("  |- resolved (internal)", str(cov.internal))
+    table.add_row("  |- resolved (external)", str(cov.external))
+    table.add_row("  \\- unresolved", str(cov.unresolved))
     table.add_row("Resolution coverage", f"[{cov_style}]{cov_pct:.1f}%[/{cov_style}]")
     table.add_row("Parser", PROVENANCE)
     env_style = "green" if result.environment.found else "yellow"
@@ -196,7 +196,7 @@ def scan(
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--venv") from exc
 
-    status_table = Table(title=f"Ravel scan — {path}")
+    status_table = Table(title=f"Ravel scan - {path}")
     status_table.add_column("scanner", style="cyan")
     status_table.add_column("status")
     status_table.add_column("version")
@@ -222,14 +222,14 @@ def scan(
     summary.add_column("metric", style="cyan")
     summary.add_column("value", justify="right")
     summary.add_row("Findings", str(m.total))
-    summary.add_row("Mapped to a node (gate ≥95%)", f"[{style}]{m.ratio:.1%}[/{style}]")
-    summary.add_row("  ├─ function / class", str(m.to_def))
-    summary.add_row("  ├─ module level (file node)", str(m.to_file))
-    summary.add_row("  ├─ dependency, linked to its importers", str(m.to_package))
+    summary.add_row("Mapped to a node (gate >=95%)", f"[{style}]{m.ratio:.1%}[/{style}]")
+    summary.add_row("  |- function / class", str(m.to_def))
+    summary.add_row("  |- module level (file node)", str(m.to_file))
+    summary.add_row("  |- dependency, linked to its importers", str(m.to_package))
     summary.add_row(
-        "  ├─ transitive dependency, via a package that needs it", str(m.via_dependency)
+        "  |- transitive dependency, via a package that needs it", str(m.via_dependency)
     )
-    summary.add_row("  └─ unmapped", str(m.unmapped))
+    summary.add_row("  \\- unmapped", str(m.unmapped))
     summary.add_row("Non-Python files (no node; outside the rate)", str(m.non_python))
     summary.add_row(
         "Unused deps: nothing imports or needs them (outside)", str(m.unused_dependency)
@@ -238,6 +238,19 @@ def scan(
         "Deps not imported, usage unknown — no env (outside)", str(m.dependency_unknown)
     )
     summary.add_row("Cross-scanner duplicates", str(cross_scanner_duplicates(report.groups)))
+    
+    # Reachability summary
+    reachable_cnt = sum(
+        1 for f in report.findings if f.finding.static_evidence and f.finding.static_evidence.reachable == "reachable"
+    )
+    unknown_cnt = sum(
+        1 for f in report.findings if f.finding.static_evidence and f.finding.static_evidence.reachable == "unknown"
+    )
+    unreachable_cnt = sum(
+        1 for f in report.findings if f.finding.static_evidence and f.finding.static_evidence.reachable == "unreachable"
+    )
+    summary.add_row("Reachability", f"[green]{reachable_cnt} reachable[/green] | [yellow]{unknown_cnt} unknown[/yellow] | [dim]{unreachable_cnt} unreachable[/dim]")
+
     cov = report.graph.coverage.ratio
     # <60% coverage invalidates reachability claims built on this graph (PRODUCT.md §9).
     cov_style = "green" if cov >= 0.80 else "yellow" if cov >= 0.60 else "red"
@@ -250,13 +263,21 @@ def scan(
         table = Table(title=f"Findings ({len(shown)} of {len(report.findings)})")
         table.add_column("rule", style="cyan")
         table.add_column("sev")
+        table.add_column("reachability")
+        table.add_column("blast radius", justify="right")
         table.add_column("cwe")
         table.add_column("location")
         table.add_column("node")
         for lf in shown:
+            ev = lf.finding.static_evidence
+            reach_str = ev.reachable.value if ev else "unreachable"
+            reach_style = "green" if reach_str == "reachable" else "yellow" if reach_str == "unknown" else "dim"
+            blast_str = str(ev.blast_radius) if ev else "0"
             table.add_row(
                 lf.finding.rule_id,
                 lf.raw.severity.value,
+                f"[{reach_style}]{reach_str}[/{reach_style}]",
+                blast_str,
                 lf.finding.cwe or "-",
                 _location(lf),
                 _anchor_label(lf),
