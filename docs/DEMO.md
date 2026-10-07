@@ -35,7 +35,7 @@ uv run ravel scan eval/fixtures/vuln_shop --venv ~/.venvs/ravel-demo
 ```
 
 Point at: 8 warnings → **3 reachable**, coverage 100%, every scanner's status
-listed (gitleaks ok, Semgrep "not configured" because we ship no rules).
+listed (gitleaks ok; Semgrep "not installed" or "not configured", since we ship no rules).
 
 ## 3. The web view
 
