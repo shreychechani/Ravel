@@ -40,7 +40,15 @@ function Code({ f }: { f: Finding }) {
   );
 }
 
-export function FindingDetail({ report, finding: f }: { report: Report; finding: Finding }) {
+export function FindingDetail({
+  report,
+  finding: f,
+  onShowInGraph,
+}: {
+  report: Report;
+  finding: Finding;
+  onShowInGraph?: (nodeId: string) => void;
+}) {
   const reviewed = f.verdict && f.verdict !== "unreachable";
   return (
     <div className="flex flex-col gap-4">
@@ -59,7 +67,17 @@ export function FindingDetail({ report, finding: f }: { report: Report; finding:
       </header>
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Why it is ranked here</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Why it is ranked here</h3>
+          {onShowInGraph && !f.package && (
+            <button
+              onClick={() => onShowInGraph(f.node_id)}
+              className="ml-auto rounded-full border border-ink px-3 py-1 text-xs font-semibold hover:bg-ink hover:text-paper"
+            >
+              Show in code graph
+            </button>
+          )}
+        </div>
         <p className="text-sm">{explain(report, f)}</p>
         <PathGraph report={report} finding={f} />
       </section>

@@ -55,6 +55,19 @@ export interface Finding {
   code: Snippet | null;
 }
 
+export interface GraphNode extends NodeInfo {
+  entry_point: boolean;
+  findings: string[];
+  worst_reach: Reach | null;
+}
+
+export interface GraphEdge {
+  src: string;
+  dst: string;
+  kind: "calls" | "imports" | "defines" | "inherits" | string;
+  resolved: boolean;
+}
+
 export interface Report {
   report_version: number;
   repo: string;
@@ -71,6 +84,7 @@ export interface Report {
   mapping: { total: number; ratio: number; to_def: number; to_file: number; to_package: number };
   cross_scanner_duplicates: number;
   findings: Finding[];
+  graph_view?: { nodes: GraphNode[]; edges: GraphEdge[] };
   triage_stats?: {
     survivors_evaluated: number;
     llm_calls: number;

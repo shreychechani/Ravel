@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { fetchReport, reachOf, rescan, type Report } from "@/lib/report";
+import { CodeGraph } from "./CodeGraph";
 import { FindingDetail } from "./FindingDetail";
 import { FindingList, type ReachFilter } from "./FindingList";
 import { ScannerStrip, Summary } from "./Summary";
@@ -17,6 +18,8 @@ export function RavelApp() {
   const [filter, setFilter] = useState<ReachFilter>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState<"findings" | "graph">("findings");
+  const [graphFocus, setGraphFocus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/health")
@@ -91,6 +94,39 @@ export function RavelApp() {
           <Summary report={report} />
           <ScannerStrip report={report} />
 
+          <nav className="flex gap-1 border-b border-line">
+            {(
+              [
+                ["findings", `Findings · ${report.findings.length}`],
+                ["graph", "Code graph"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`-mb-px rounded-t-xl border px-4 py-2 text-sm font-semibold ${
+                  tab === key ? "border-line border-b-paper bg-paper text-ink" : "border-transparent text-muted hover:text-ink"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          {tab === "graph" && (
+            <CodeGraph
+              report={report}
+              focus={graphFocus}
+              onOpenFinding={(id) => {
+                setFilter("all");
+                setQuery("");
+                setSelected(id);
+                setTab("findings");
+              }}
+            />
+          )}
+
+          {tab === "findings" && (
           <div className="grid gap-5 lg:grid-cols-[minmax(320px,420px)_1fr]">
             <aside className="flex flex-col gap-3">
               <div className="flex flex-wrap gap-1.5">
@@ -118,12 +154,20 @@ export function RavelApp() {
             </aside>
             <main className="min-w-0 rounded-2xl border border-line bg-paper p-1">
               {current ? (
-                <FindingDetail report={report} finding={current} />
+                <FindingDetail
+                  report={report}
+                  finding={current}
+                  onShowInGraph={(nodeId) => {
+                    setGraphFocus(nodeId);
+                    setTab("graph");
+                  }}
+                />
               ) : (
                 <p className="p-6 text-sm text-muted">Select a finding to see its path and evidence.</p>
               )}
             </main>
           </div>
+          )}
         </>
       )}
     </div>
