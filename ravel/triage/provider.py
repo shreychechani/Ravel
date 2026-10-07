@@ -154,11 +154,13 @@ class OllamaProvider:
         model_name: str = "llama3.2",
         host: str | None = None,
         timeout: float = 60.0,
+        json_output: bool = True,
     ) -> None:
         self.model_name = model_name
         base = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self.endpoint = base.rstrip("/") + "/api/chat"
         self.timeout = timeout
+        self.json_output = json_output  # triage verdicts are JSON; summaries are prose
 
     def generate(self, prompt: str, system: str | None = None) -> LLMResponse:
         messages: list[dict[str, str]] = []
@@ -166,13 +168,14 @@ class OllamaProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model_name,
             "messages": messages,
             "stream": False,
-            "format": "json",
             "options": {"temperature": 0.0},
         }
+        if self.json_output:
+            payload["format"] = "json"
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -210,12 +213,14 @@ class OpenAICompatibleProvider:
         model_name: str = "gpt-4o-mini",
         base_url: str | None = None,
         timeout: float = 60.0,
+        json_output: bool = True,
     ) -> None:
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.model_name = model_name
         base = base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.endpoint = base.rstrip("/") + "/chat/completions"
         self.timeout = timeout
+        self.json_output = json_output
 
     def generate(self, prompt: str, system: str | None = None) -> LLMResponse:
         if not self.api_key:
@@ -226,12 +231,13 @@ class OpenAICompatibleProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model_name,
             "messages": messages,
-            "response_format": {"type": "json_object"},
             "temperature": 0.0,
         }
+        if self.json_output:
+            payload["response_format"] = {"type": "json_object"}
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -272,18 +278,20 @@ def create_provider(
     model: str | None = None,
     api_key: str | None = None,
     host: str | None = None,
+    json_output: bool = True,
 ) -> LLMProvider:
-    """Factory creating an LLM provider based on configuration."""
+    """Factory creating an LLM provider. ``json_output=False`` for prose (summaries)."""
     ptype = provider_type.lower()
     if ptype == "mock":
         return MockProvider(model_name=model or "mock-triage-model")
     if ptype == "ollama":
-        return OllamaProvider(model_name=model or "llama3.2", host=host)
+        return OllamaProvider(model_name=model or "llama3.2", host=host, json_output=json_output)
     if ptype in ("openai", "byo-key", "remote"):
         return OpenAICompatibleProvider(
             api_key=api_key,
             model_name=model or "gpt-4o-mini",
             base_url=host,
+            json_output=json_output,
         )
     raise ValueError(
         f"Unknown LLM provider type: {provider_type!r}. Must be 'mock', 'ollama', or 'openai'."
