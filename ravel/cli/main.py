@@ -331,7 +331,7 @@ def scan(
         table.add_column("node")
         for lf in shown:
             ev = lf.finding.static_evidence
-            reach_str = ev.reachable.value if ev else "unreachable"
+            reach_str = ev.reachable.value if ev else "unknown"
             reach_style = (
                 "green"
                 if reach_str == "reachable"

@@ -183,6 +183,44 @@ def test_internal_entry_point_ignored() -> None:
     assert finding.static_evidence.reachable is Reachability.UNREACHABLE
 
 
+def test_finding_without_node_is_unknown() -> None:
+    """A finding with no node in the graph has nothing to trace -> UNKNOWN, not UNREACHABLE."""
+    graph = nx.MultiDiGraph()
+    graph.add_node("app.py::route_handler")
+    eps = [
+        EntryPoint(
+            node_id="app.py::route_handler",
+            kind=EntryPointKind.HTTP_ROUTE,
+            trust=Trust.UNTRUSTED,
+        )
+    ]
+    graph_res = GraphResult(graph=graph, nodes=[], edges=[], entry_points=eps)
+    no_node = _make_finding("f_none", "")
+    missing_node = _make_finding("f_missing", "gone.py::f")
+
+    analyze_reachability(graph_res, [no_node, missing_node])
+
+    for f in (no_node, missing_node):
+        assert f.static_evidence is not None
+        assert f.static_evidence.reachable is Reachability.UNKNOWN
+
+
+def test_no_entry_points_marks_everything_unknown() -> None:
+    """No entry points detected -> UNKNOWN for all, since unreachable would be a guess."""
+    graph = nx.MultiDiGraph()
+    nodes = [_make_node("app.py::handler"), _make_node("db.py::query")]
+    for n in nodes:
+        graph.add_node(n.id)
+    graph.add_edge("app.py::handler", "db.py::query", key="calls", kind="calls", resolved=True)
+    graph_res = GraphResult(graph=graph, nodes=nodes, edges=[], entry_points=[])
+    finding = _make_finding("f_noep", "db.py::query")
+
+    analyze_reachability(graph_res, [finding])
+
+    assert finding.static_evidence is not None
+    assert finding.static_evidence.reachable is Reachability.UNKNOWN
+
+
 def test_blast_radius_multiple_routes() -> None:
     """A sink reachable from 3 untrusted routes has blast_radius == 3."""
     graph = nx.MultiDiGraph()
@@ -223,8 +261,10 @@ def test_blast_radius_multiple_routes() -> None:
 def test_rank_findings_ordering() -> None:
     """Findings rank by Reachability (REACHABLE > UNKNOWN > UNREACHABLE), blast radius, severity."""
     f_unreachable = _make_finding("f_unreach", "n1", "HIGH")
+    g_isolated = nx.DiGraph()
+    g_isolated.add_nodes_from(["ep1", "n1"])
     f_unreachable.static_evidence = evaluate_node_reachability(
-        [], set(), nx.DiGraph(), nx.DiGraph()
+        ["n1"], {"ep1"}, g_isolated, g_isolated
     )
 
     f_unknown = _make_finding("f_unk", "n2", "CRITICAL")

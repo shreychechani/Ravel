@@ -63,7 +63,16 @@ def evaluate_node_reachability(
     full_graph: nx.DiGraph,
 ) -> StaticEvidence:
     """Determine reachability, path, and blast radius for a set of target nodes."""
-    if not untrusted_ep_ids or not target_node_ids:
+    # A finding with no node in the graph (non-Python file, unmapped, unused or
+    # unknown dependency) has nothing to trace: unknown, never unreachable (§6).
+    if not any(t in full_graph for t in target_node_ids):
+        return StaticEvidence(
+            reachable=Reachability.UNKNOWN,
+            path=[],
+            blast_radius=0,
+        )
+
+    if not untrusted_ep_ids:
         return StaticEvidence(
             reachable=Reachability.UNREACHABLE,
             path=[],
@@ -157,6 +166,12 @@ def analyze_reachability[F: (Finding, LocatedFinding)](
 
     resolved_g, full_g = _build_subgraphs(graph_result.graph)
 
+    # No entry points detected at all means detection found no way in, not that
+    # there is none: "unreachable" would then be a guess, so everything is unknown.
+    no_entry_points = not graph_result.entry_points
+    if no_entry_points:
+        log.warning("reachability: no entry points detected; all findings marked unknown")
+
     for item in findings:
         finding = item.finding if isinstance(item, LocatedFinding) else item
 
@@ -170,7 +185,10 @@ def analyze_reachability[F: (Finding, LocatedFinding)](
         elif finding.node_id:
             target_ids.append(finding.node_id)
 
-        evidence = evaluate_node_reachability(target_ids, untrusted_eps, resolved_g, full_g)
+        if no_entry_points:
+            evidence = StaticEvidence(reachable=Reachability.UNKNOWN, path=[], blast_radius=0)
+        else:
+            evidence = evaluate_node_reachability(target_ids, untrusted_eps, resolved_g, full_g)
         finding.static_evidence = evidence
 
     reachable_count = 0
