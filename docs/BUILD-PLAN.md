@@ -18,18 +18,18 @@ Python**, we do not import or run it. See the reuse map before porting anything.
 
 ---
 
-## Status (2026-09-27)
+## Status (2026-10-07)
 
 Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 
 | Phase | State | One-line |
 |---|---|---|
-| 0 — Foundation | 🚧 | scaffold + tooling + domain model + hashing done; ORM/Postgres persistence, LLM abstraction, CVE fixtures + CI not yet |
-| 1 — Graph slice | ✅ | parse → Jedi call resolution → `calls` + `defines` + `inherits` + `imports` edges + coverage + FastAPI/Flask/Django entry points + dependency-aware Jedi env; **correctness checkpoint passed** on flaskr (42/42 cases, 81.6% coverage), plus external checks: PyCG benchmark (98.3% precision / 71.2% recall) and dynamic-oracle recall (89.7%) — pending an independent re-check of the flaskr ground truth |
-| 2 — Scanners + eval | 🚧 | Bandit + Semgrep (user-supplied local rules) + OSV-Scanner (offline DB) wrapped; findings anchored on graph nodes (100% mapped on fixtures) with content-hash ids + cross-scanner dedupe; dependency CVEs linked to the code importing the package, transitive ones via the package that needs them; `ravel scan`, `ravel osv-db update`. gitleaks and the eval harness not yet |
-| 3 — Reachability | ⬜ | not started (the core contribution) |
-| 4 — Triage + ranking | ⬜ | not started |
-| 5 — Interface + deps + incremental | ⬜ | not started |
+| 0 — Foundation | ✅ (one deferral) | scaffold, tooling, domain model, hashing, swappable LLM provider (mock / Ollama / OpenAI-compatible), fixtures, **CI green** (`.github/workflows/ci.yml`: ruff, mypy, pytest, web build). **Deferred (decided 2026-10-07):** SQLAlchemy/Alembic/Postgres persistence — nothing yet needs it; scans run in memory with JSON output |
+| 1 — Graph slice | ✅ | checkpoint passed on flaskr (42/42, 81.6% coverage); PyCG 98.3% / 71.2%; dynamic-oracle recall 89.7%. Added: scan a **git URL** (`--ref`), **`ExternalRef.version`** from the target env, tree-sitter pinned <0.26 after a segfault on PyGoat. Still wanted: an independent re-check of the flaskr ground truth |
+| 2 — Scanners + eval | ✅ | Bandit, Semgrep (local rules), OSV-Scanner (offline DB) and **gitleaks** (default rules, `--redact`) all wrapped; **eval harness** `uv run python -m eval.run` (pinned repos + venvs, keep-all / severity / random-N / Ravel / Ravel+triage, precision next to recall) |
+| 3 — Reachability | ✅ **checkpoint PASSED** | reachable / unknown / unreachable + path + blast radius; ranking. Pooled over vulpy-bad + flaskr: precision 11.7% → 100% (**×8.57**, gate ×3), recall retained **100%** (gate 85%), end-to-end recall 55.6%. Caveats: 2 repos; vulpy labels written after seeing output — **needs an independent re-check**; PyGoat scanned but not yet labelled |
+| 4 — Triage + ranking | ✅ built · ❌ **triage checkpoint FAILED** | context assembly, CWE prompts, content-hash verdict cache, token budget + kill switch; **bottom-up summaries** (`ravel summarize`). With llama3.2 3B, triage dropped one real SQLi (read `'%s' %` as a parameterised query): recall retained 100% → 80%, no precision gain → **ships disabled** (`--no-triage` default). Retest with a stronger model |
+| 5 — Interface + deps + incremental | 🚧 | **web view done** (`ravel serve`: ranked findings, traced paths, AI verdicts). Deps/migration report, Code Wiki pages, incremental re-index: not started |
 
 Per-phase markers below carry the detail.
 
@@ -83,7 +83,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 2 — Scanners + eval harness (parallel, *different owner*) — 🚧 in progress
+## Phase 2 — Scanners + eval harness (parallel, *different owner*) — ✅ done
 
 **Goal:** real findings, normalized and mapped to nodes; a scoreboard we trust.
 
@@ -110,7 +110,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 3 — Reachability (the core contribution) — ⬜ not started
+## Phase 3 — Reachability (the core contribution) — ✅ done, checkpoint passed
 
 **Goal:** filter findings by whether untrusted input can reach them.
 **Deterministic, no LLM.**
@@ -124,7 +124,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 4 — Triage + ranking (LLM, only if Phase 3 passes) — ⬜ not started
+## Phase 4 — Triage + ranking (LLM, only if Phase 3 passes) — ✅ built; triage checkpoint failed → disabled by default
 
 - Context assembly from the graph (flagged code + callers + module summary). Bottom-up summaries, hash-cached.
 - Verdict: structured JSON only, cached, budget-capped. **Cache key = hash of the *assembled context*, not the node** (§8 trap).
@@ -136,7 +136,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 5 — Interface + deps + incremental — ⬜ not started
+## Phase 5 — Interface + deps + incremental — 🚧 web view done
 
 - Output: CLI + JSON, then single-page web view (Next.js + react-flow + **dagre**, not d3-force) showing traced paths.
 - Deps report: deprecated-API + outdated-dependency, classified by reachability (reuses Phase 2 OSV work).
