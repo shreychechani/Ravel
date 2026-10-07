@@ -5,7 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from eval.run import RepoSpec, checkpoint, load_spec, pooled, score_report
+from eval.run import (
+    RepoSpec,
+    Score,
+    checkpoint,
+    load_spec,
+    pooled,
+    score_report,
+    triage_checkpoint,
+)
 from ravel.scanners.run import ScanReport, scan_repo
 
 ROOT = Path(__file__).parent.parent
@@ -81,3 +89,13 @@ def test_spec_needs_a_source(tmp_path: Path) -> None:
     path.write_text('[repo]\nname = "x"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="needs local, or url"):
         load_spec(path)
+
+
+def test_triage_must_raise_precision_without_losing_recall() -> None:
+    ravel = Score(kept=7, true_pos=7, cases_hit=5, detected=5, truth=9)
+    worse = Score(kept=6, true_pos=6, cases_hit=4, detected=5, truth=9)  # dropped a real one
+    better = Score(kept=5, true_pos=5, cases_hit=5, detected=5, truth=9)
+    noisy = Score(kept=9, true_pos=7, cases_hit=5, detected=5, truth=9)
+    assert triage_checkpoint({"ravel": ravel}) is None
+    assert triage_checkpoint({"ravel": ravel, "ravel+triage": worse}) is False
+    assert triage_checkpoint({"ravel": noisy, "ravel+triage": better}) is True

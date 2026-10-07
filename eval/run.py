@@ -277,6 +277,19 @@ def checkpoint(pool: dict[str, Score]) -> tuple[bool, float | None]:
     return passed, factor
 
 
+def triage_checkpoint(pool: dict[str, Score]) -> bool | None:
+    """Does triage add anything over reachability alone? (§10: if not, ship it disabled.)
+
+    It must raise precision without losing any recall retained.
+    """
+    if "ravel+triage" not in pool:
+        return None
+    base, tri = pool["ravel"], pool["ravel+triage"]
+    gained = (tri.precision or 0) > (base.precision or 0)
+    kept_recall = (tri.recall_retained or 0) >= (base.recall_retained or 0)
+    return gained and kept_recall
+
+
 def _pct(x: float | None) -> str:
     return "-" if x is None else f"{x:.1%}"
 
@@ -298,6 +311,14 @@ def render(results: list[RepoResult], pool: dict[str, Score], console: Console) 
         if factor is not None
         else f"Phase 3 checkpoint: no precision to compare → {verdict}"
     )
+    tri = triage_checkpoint(pool)
+    if tri is not None:
+        t = pool["ravel+triage"]
+        console.print(
+            f"Phase 4 triage checkpoint: precision {_pct(pool['ravel'].precision)} → "
+            f"{_pct(t.precision)}, recall retained {retained} → {_pct(t.recall_retained)} → "
+            + ("[green]PASS[/green]" if tri else "[red]FAIL: keep triage disabled[/red]")
+        )
 
 
 def _table(title: str, scores: dict[str, Score], order: list[str]) -> Table:
@@ -373,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
                     },
                     "pooled": {m: s.__dict__ for m, s in pool.items()},
                     "checkpoint": {"passed": passed, "precision_factor": factor},
+                    "triage_checkpoint": triage_checkpoint(pool),
                 },
                 indent=2,
             ),
