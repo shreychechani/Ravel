@@ -5,12 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import networkx as nx
-import pytest
-
-from ravel.graph.resolve import Coverage, GraphResult
+from ravel.graph.resolve import GraphResult
 from ravel.models import (
-    Edge,
-    EdgeKind,
     EntryPoint,
     EntryPointKind,
     Finding,
@@ -20,8 +16,6 @@ from ravel.models import (
     Reachability,
     Trust,
 )
-from ravel.scanners.base import RawFinding, Severity
-from ravel.scanners.normalize import LocatedFinding
 from ravel.scanners.run import scan_repo
 from ravel.triage.ranking import rank_findings
 from ravel.triage.reachability import analyze_reachability, evaluate_node_reachability
@@ -62,7 +56,9 @@ def test_reachable_path() -> None:
     for n in nodes:
         graph.add_node(n.id)
 
-    graph.add_edge("app.py::route_handler", "app.py::helper_f1", key="calls", kind="calls", resolved=True)
+    graph.add_edge(
+        "app.py::route_handler", "app.py::helper_f1", key="calls", kind="calls", resolved=True
+    )
     graph.add_edge("app.py::helper_f1", "app.py::sink_f2", key="calls", kind="calls", resolved=True)
 
     eps = [
@@ -199,9 +195,15 @@ def test_blast_radius_multiple_routes() -> None:
     for n in nodes:
         graph.add_node(n.id)
 
-    graph.add_edge("api.py::route1", "common.py::vulnerable_util", key="calls", kind="calls", resolved=True)
-    graph.add_edge("api.py::route2", "common.py::vulnerable_util", key="calls", kind="calls", resolved=True)
-    graph.add_edge("api.py::route3", "common.py::vulnerable_util", key="calls", kind="calls", resolved=True)
+    graph.add_edge(
+        "api.py::route1", "common.py::vulnerable_util", key="calls", kind="calls", resolved=True
+    )
+    graph.add_edge(
+        "api.py::route2", "common.py::vulnerable_util", key="calls", kind="calls", resolved=True
+    )
+    graph.add_edge(
+        "api.py::route3", "common.py::vulnerable_util", key="calls", kind="calls", resolved=True
+    )
 
     eps = [
         EntryPoint(node_id="api.py::route1", kind=EntryPointKind.HTTP_ROUTE, trust=Trust.UNTRUSTED),
@@ -219,9 +221,11 @@ def test_blast_radius_multiple_routes() -> None:
 
 
 def test_rank_findings_ordering() -> None:
-    """Findings must rank by Reachability (REACHABLE > UNKNOWN > UNREACHABLE), then blast radius, then severity."""
+    """Findings rank by Reachability (REACHABLE > UNKNOWN > UNREACHABLE), blast radius, severity."""
     f_unreachable = _make_finding("f_unreach", "n1", "HIGH")
-    f_unreachable.static_evidence = evaluate_node_reachability([], set(), nx.DiGraph(), nx.DiGraph())
+    f_unreachable.static_evidence = evaluate_node_reachability(
+        [], set(), nx.DiGraph(), nx.DiGraph()
+    )
 
     f_unknown = _make_finding("f_unk", "n2", "CRITICAL")
     f_unknown.static_evidence = evaluate_node_reachability(
@@ -255,7 +259,7 @@ def test_rank_findings_ordering() -> None:
 
 
 def test_scan_repo_runs_reachability_on_flaskr() -> None:
-    """Integration test: scan_repo on flaskr verifies Bandit asserts in test files are UNREACHABLE."""
+    """Verify Bandit asserts in test files are UNREACHABLE on flaskr."""
     report = scan_repo(FLASKR)
 
     assert len(report.findings) > 0
@@ -263,10 +267,8 @@ def test_scan_repo_runs_reachability_on_flaskr() -> None:
     for lf in report.findings:
         assert lf.finding.static_evidence is not None
 
-    # Test file findings (e.g. Bandit B101 assert in tests/test_auth.py) must NOT be REACHABLE from HTTP routes
-    test_findings = [
-        lf for lf in report.findings if "tests/" in lf.raw.rel_path
-    ]
+    # Test file findings (Bandit B101 in tests/test_auth.py) must NOT be REACHABLE from routes
+    test_findings = [lf for lf in report.findings if "tests/" in lf.raw.rel_path]
     for tf in test_findings:
         assert tf.finding.static_evidence is not None
         assert tf.finding.static_evidence.reachable is Reachability.UNREACHABLE

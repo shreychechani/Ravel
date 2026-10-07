@@ -27,3 +27,37 @@ def test_scan_writes_normalized_findings_json(tmp_path: Path) -> None:
     assert secret["file"] == "mysite/settings.py"
     assert secret["cwe"] == "CWE-259"
     assert secret["node_id"] == "mysite/settings.py::<file>"
+
+
+def test_scan_with_triage_flag(tmp_path: Path) -> None:
+    out = tmp_path / "scan_triage.json"
+    cache_file = tmp_path / "triage_cache.json"
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            str(DJANGO),
+            "--triage",
+            "--llm-provider",
+            "mock",
+            "--triage-cache",
+            str(cache_file),
+            "--json",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "LLM Triage" in result.output
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert "findings" in payload
+    for f in payload["findings"]:
+        assert "verdict" in f
+        assert f["verdict"] is not None
+        # scanner_confidence is separate from the LLM triage confidence
+        assert "scanner_confidence" in f
+    # triage_stats must be in JSON output when --triage is active
+    assert "triage_stats" in payload
+    ts = payload["triage_stats"]
+    assert ts["total"] > 0
+    assert "llm_calls" in ts
+    assert "cached_hits" in ts
