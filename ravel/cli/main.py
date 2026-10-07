@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from git import GitCommandError
 from rich.console import Console
 from rich.table import Table
 
@@ -21,6 +22,7 @@ from ravel.api.server import ReportStore, create_app, load_report
 from ravel.core.logging import configure_logging, get_logger
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
+from ravel.ingest.remote import fetch_repo, is_remote
 from ravel.models import EdgeKind, NodeKind, Reachability
 from ravel.report import build_report
 from ravel.scanners.base import ScanStatus
@@ -42,18 +44,34 @@ def _root() -> None:
     """Ravel — reachability-aware security triage for Python codebases."""
 
 
+_TargetArg = Annotated[
+    str,
+    typer.Argument(help="Path to a Python repo, or a git URL to clone (https://, git@...)."),
+]
+_RefOpt = Annotated[
+    str | None,
+    typer.Option("--ref", help="With a git URL: the commit, tag or branch to scan."),
+]
+
+
+def _resolve_target(target: str, ref: str | None) -> Path:
+    """A local repo directory: the path itself, or a cached clone of a git URL."""
+    if is_remote(target):
+        try:
+            return fetch_repo(target, ref)
+        except GitCommandError as exc:
+            raise typer.BadParameter(f"could not clone {target}: {exc}") from exc
+    if ref is not None:
+        raise typer.BadParameter("--ref only applies to a git URL", param_hint="--ref")
+    path = Path(target)
+    if not path.is_dir():
+        raise typer.BadParameter(f"{target} is not a directory or a git URL")
+    return path
+
+
 @app.command()
 def index(
-    path: Annotated[
-        Path,
-        typer.Argument(
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            readable=True,
-            help="Path to a Python repository.",
-        ),
-    ],
+    target: _TargetArg,
     json_out: Annotated[
         Path | None,
         typer.Option("--json", help="Write the extracted nodes to this JSON file."),
@@ -67,9 +85,11 @@ def index(
             help="The repo's virtualenv, if not at PATH/.venv, venv or env. Read, never run.",
         ),
     ] = None,
+    ref: _RefOpt = None,
 ) -> None:
     """Index a Python repo: build the call graph and report coverage."""
     configure_logging()
+    path = _resolve_target(target, ref)
 
     try:
         result = build_graph(path, venv=venv)
@@ -145,12 +165,6 @@ def index(
         log.info("Wrote graph (%d nodes, %d edges) to %s", len(nodes), len(result.edges), json_out)
 
 
-_PathArg = Annotated[
-    Path,
-    typer.Argument(
-        exists=True, file_okay=False, dir_okay=True, readable=True, help="Path to a Python repo."
-    ),
-]
 _VenvOpt = Annotated[
     Path | None,
     typer.Option(
@@ -164,7 +178,7 @@ _VenvOpt = Annotated[
 
 @app.command()
 def scan(
-    path: _PathArg,
+    target: _TargetArg,
     venv: _VenvOpt = None,
     json_out: Annotated[
         Path | None, typer.Option("--json", help="Write normalized findings to this JSON file.")
@@ -207,9 +221,11 @@ def scan(
         Path | None,
         typer.Option("--triage-cache", help="Path to triage cache JSON file."),
     ] = None,
+    ref: _RefOpt = None,
 ) -> None:
     """Run the security scanners, reachability filter, and optionally adjudicate findings."""
     configure_logging()
+    path = _resolve_target(target, ref)
     try:
         scanners = default_scanners(semgrep_config, semgrep_bin, osv_db, osv_bin)
     except ValueError as exc:
@@ -388,11 +404,9 @@ _DEFAULT_UI_DIR = Path(__file__).resolve().parents[2] / "web" / "out"
 @app.command()
 def serve(
     target: Annotated[
-        Path,
+        str,
         typer.Argument(
-            exists=True,
-            readable=True,
-            help="A Python repo to scan, or a report written by `ravel scan --json`.",
+            help="A Python repo or git URL to scan, or a report written by `ravel scan --json`.",
         ),
     ],
     venv: _VenvOpt = None,
@@ -421,14 +435,15 @@ def serve(
     ui_dir: Annotated[
         Path | None, typer.Option("--ui-dir", help="Built web view (default: web/out).")
     ] = None,
+    ref: _RefOpt = None,
 ) -> None:
     """Open the web view of a scan on http://127.0.0.1 (local only, read-only)."""
     import uvicorn
 
     configure_logging()
-    if target.is_file():
+    if not is_remote(target) and Path(target).is_file():
         try:
-            store = ReportStore(report=load_report(target))
+            store = ReportStore(report=load_report(Path(target)))
         except (ValueError, json.JSONDecodeError) as exc:
             raise typer.BadParameter(str(exc), param_hint="TARGET") from exc
     else:
@@ -437,14 +452,15 @@ def serve(
             create_provider(llm_provider, model=model)  # fail fast on a bad provider
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
-        graph = build_graph(target, venv=venv)  # built once; rescans reuse it
+        root = _resolve_target(target, ref)
+        graph = build_graph(root, venv=venv)  # built once; rescans reuse it
 
         def run_scan(with_triage: bool) -> dict[str, object]:
             provider = create_provider(llm_provider, model=model) if with_triage else None
             budget = TokenBudget(limit=token_budget) if with_triage else None
             cache = TriageCache(cache_file=triage_cache) if with_triage else None
             report = scan_repo(
-                target,
+                root,
                 venv=venv,
                 scanners=scanners,
                 graph=graph,
@@ -452,7 +468,7 @@ def serve(
                 token_budget=budget,
                 triage_cache=cache,
             )
-            return build_report(report, target, budget)
+            return build_report(report, root, budget)
 
         store = ReportStore(scan=run_scan)
         store.rescan(triage)  # the page opens on a finished scan
