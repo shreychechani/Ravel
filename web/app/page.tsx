@@ -1,3 +1,5 @@
+import { RavelApp } from "@/components/RavelApp";
+
 export default function Page() {
-  return <main className="p-8">Ravel</main>;
+  return <RavelApp />;
 }
