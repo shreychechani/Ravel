@@ -4,6 +4,7 @@
 ``ravel scan PATH`` runs the security scanners, filters findings by reachability,
 optionally performs LLM adjudication, and anchors every finding on a graph node.
 ``ravel serve PATH`` opens the web view of a scan on localhost.
+``ravel summarize PATH`` writes bottom-up function and module summaries with an LLM.
 ``ravel osv-db update`` downloads the offline vulnerability database.
 """
 
@@ -29,6 +30,7 @@ from ravel.scanners.base import ScanStatus
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.osv import default_db_dir, update_db
 from ravel.scanners.run import default_scanners, scan_repo
+from ravel.summarize.summaries import SummaryCache, summaries_payload, summarize_graph
 from ravel.triage.cache import TriageCache
 from ravel.triage.provider import TokenBudget, create_provider
 
@@ -396,6 +398,63 @@ def scan(
         payload = build_report(report, path, budget)
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote %d findings to %s", len(report.findings), json_out)
+
+
+@app.command()
+def summarize(
+    target: _TargetArg,
+    venv: _VenvOpt = None,
+    ref: _RefOpt = None,
+    llm_provider: Annotated[
+        str, typer.Option("--llm-provider", help="LLM provider: 'mock', 'ollama', or 'openai'.")
+    ] = "mock",
+    model: Annotated[str | None, typer.Option("--model", help="Model name.")] = None,
+    token_budget: Annotated[
+        int, typer.Option("--token-budget", help="Token budget before the kill switch.")
+    ] = 100_000,
+    limit: Annotated[
+        int | None, typer.Option(help="Summarise at most this many functions/classes.")
+    ] = None,
+    summary_cache: Annotated[
+        Path | None, typer.Option("--summary-cache", help="Path to the summary cache JSON.")
+    ] = None,
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write the summaries to this JSON file.")
+    ] = None,
+) -> None:
+    """Summarise a repo bottom-up with an LLM: functions callee-first, then modules."""
+    configure_logging()
+    path = _resolve_target(target, ref)
+    try:
+        provider = create_provider(llm_provider, model=model, json_output=False)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--llm-provider") from exc
+    try:
+        graph = build_graph(path, venv=venv)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--venv") from exc
+    budget = TokenBudget(limit=token_budget)
+    run = summarize_graph(graph, path, provider, budget, SummaryCache(summary_cache), limit)
+
+    nodes = {n.id: n for n in graph.nodes}
+    table = Table(title=f"Module summaries - {path}")
+    table.add_column("module", style="cyan")
+    table.add_column("summary")
+    for s in run.summaries.values():
+        node = nodes[s.node_id]
+        if node.kind is NodeKind.FILE:
+            flag = " [yellow](unverified names)[/yellow]" if s.flagged else ""
+            table.add_row(node.file_path, s.text + flag)
+    console.print(table)
+    st = run.stats
+    console.print(
+        f"{st.generated} generated, {st.cached} from cache, {st.flagged} flagged, "
+        f"{st.skipped_budget} skipped by the token budget · {st.llm_calls} LLM calls, "
+        f"{budget.total}/{budget.limit} tokens"
+    )
+    if json_out is not None:
+        json_out.write_text(json.dumps(summaries_payload(run, graph), indent=2), encoding="utf-8")
+        log.info("Wrote %d summaries to %s", len(run.summaries), json_out)
 
 
 _DEFAULT_UI_DIR = Path(__file__).resolve().parents[2] / "web" / "out"
