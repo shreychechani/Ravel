@@ -15,9 +15,10 @@ def test_scan_writes_normalized_findings_json(tmp_path: Path) -> None:
     out = tmp_path / "scan.json"
     result = CliRunner().invoke(app, ["scan", str(DJANGO), "--json", str(out)])
     assert result.exit_code == 0, result.output
-    assert "not integrated yet" in result.output  # missing scanners are visible
     payload = json.loads(out.read_text(encoding="utf-8"))
-    assert payload["not_integrated"] == ["gitleaks"]
+    assert payload["not_integrated"] == []
+    gitleaks = next(s for s in payload["scanners"] if s["source"] == "gitleaks")
+    assert gitleaks["status"] in {"not_installed", "ok"}  # reported either way, never hidden
     osv = next(s for s in payload["scanners"] if s["source"] == "osv")
     assert osv["status"] in {"not_installed", "not_configured", "ok"}
     semgrep = next(s for s in payload["scanners"] if s["source"] == "semgrep")

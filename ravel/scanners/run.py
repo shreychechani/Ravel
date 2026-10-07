@@ -10,6 +10,7 @@ from ravel.graph.resolve import GraphResult, build_graph
 from ravel.models import FindingSource, NodeKind
 from ravel.scanners.bandit import BanditScanner
 from ravel.scanners.base import Scanner, ScanResult
+from ravel.scanners.gitleaks import GitleaksScanner
 from ravel.scanners.normalize import (
     DuplicateGroup,
     LocatedFinding,
@@ -29,7 +30,7 @@ log = get_logger("ravel.scanners.run")
 
 # Scanners in PRODUCT.md §5 that have no wrapper yet. Listed so every report
 # states the recall it is missing instead of implying full coverage.
-NOT_YET_INTEGRATED = (FindingSource.GITLEAKS,)
+NOT_YET_INTEGRATED: tuple[FindingSource, ...] = ()
 
 
 def default_scanners(
@@ -44,6 +45,7 @@ def default_scanners(
         BanditScanner(),
         SemgrepScanner(semgrep_configs, semgrep_bin),
         OsvScanner(osv_db, osv_bin),
+        GitleaksScanner(),
     ]
 
 
