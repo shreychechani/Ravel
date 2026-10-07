@@ -54,3 +54,20 @@ def test_every_referenced_node_is_labelled(report: dict[str, Any]) -> None:
     for f in report["findings"]:
         for nid in [*f["static_evidence"]["path"], *f["callers"], f["node_id"]]:
             assert nid in report["nodes"], nid
+
+
+def test_graph_view_carries_the_whole_code_graph(report: dict[str, Any]) -> None:
+    view = report["graph_view"]
+    by_name = {n["name"]: n for n in view["nodes"]}
+    assert {"search", "find_product", "backup", "shop.app"} <= set(by_name)
+    assert by_name["search"]["entry_point"] and not by_name["find_product"]["entry_point"]
+    assert by_name["find_product"]["worst_reach"] == "reachable"
+    assert by_name["backup"]["worst_reach"] == "unreachable"
+    assert by_name["find_product_safe"]["findings"] == []
+    ids = {n["id"] for n in view["nodes"]}
+    assert all(e["src"] in ids and e["dst"] in ids for e in view["edges"])
+    calls = {(e["src"], e["dst"]) for e in view["edges"] if e["kind"] == "calls"}
+    assert (by_name["search"]["id"], by_name["find_product"]["id"]) in calls
+    # unresolved calls stay visible as unknown nodes, never dropped (§6)
+    assert any(n["kind"] == "unknown" for n in view["nodes"])
+    assert all(not e["resolved"] for e in view["edges"] if e["dst"].startswith("unknown::"))

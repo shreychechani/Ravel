@@ -23,7 +23,7 @@ from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.run import ScanReport
 from ravel.triage.provider import TokenBudget
 
-REPORT_VERSION = 1
+REPORT_VERSION = 2  # 2: adds "graph_view", the whole code graph
 _SNIPPET_MAX_LINES = 60
 _FILE_WINDOW = 5  # lines either side of a module-level finding
 
@@ -122,6 +122,69 @@ def _finding_entry(
     }
 
 
+def _graph_view(graph: GraphResult, findings: list[LocatedFinding]) -> dict[str, Any]:
+    """The whole code graph, for the web view's graph tab.
+
+    Every file, class and function, with the edges between them. A call that
+    could not be resolved points at an ``unknown`` node and is marked
+    ``resolved: false`` — shown, never hidden (§6). Each node carries the
+    findings anchored on it and the most reachable of them.
+    """
+    order = {"reachable": 0, "unknown": 1, "unreachable": 2}
+    per_node: dict[str, list[tuple[str, str]]] = {}
+    for lf in findings:
+        ev = lf.finding.static_evidence
+        reach = ev.reachable.value if ev else "unknown"
+        targets = [lf.node.id] if lf.node is not None else [a.id for a in lf.anchors]
+        for nid in targets:
+            per_node.setdefault(nid, []).append((lf.finding.id, reach))
+    entry = {ep.node_id for ep in graph.entry_points}
+    nodes_out: list[dict[str, Any]] = []
+    for n in graph.nodes:
+        hits = per_node.get(n.id, [])
+        nodes_out.append(
+            {
+                **_node_info(n),
+                "entry_point": n.id in entry,
+                "findings": [fid for fid, _ in hits],
+                "worst_reach": min((r for _, r in hits), key=order.__getitem__, default=None),
+            }
+        )
+    known = {n.id for n in graph.nodes}
+    unknown_ids: set[str] = set()
+    edges_out: list[dict[str, Any]] = []
+    for u, v, key, data in graph.graph.edges(keys=True, data=True):
+        if u not in known:
+            continue
+        if v not in known:
+            if not str(v).startswith("unknown::"):
+                continue
+            unknown_ids.add(str(v))
+        edges_out.append(
+            {
+                "src": u,
+                "dst": v,
+                "kind": str(data.get("kind", key)),
+                "resolved": bool(data.get("resolved", True)),
+            }
+        )
+    for uid in sorted(unknown_ids):
+        nodes_out.append(
+            {
+                "id": uid,
+                "kind": "unknown",
+                "name": uid.removeprefix("unknown::") or "?",
+                "file": "",
+                "line": 0,
+                "end_line": 0,
+                "entry_point": False,
+                "findings": [],
+                "worst_reach": None,
+            }
+        )
+    return {"nodes": nodes_out, "edges": edges_out}
+
+
 def build_report(
     report: ScanReport, root: Path | str, budget: TokenBudget | None = None
 ) -> dict[str, Any]:
@@ -189,6 +252,7 @@ def build_report(
             "ratio": m.ratio,
         },
         "cross_scanner_duplicates": cross_scanner_duplicates(report.groups),
+        "graph_view": _graph_view(graph, report.findings),
         "findings": findings,
     }
     if report.triage_stats is not None:
