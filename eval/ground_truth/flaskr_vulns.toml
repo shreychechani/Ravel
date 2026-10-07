@@ -1,0 +1,14 @@
+# Ground truth: flaskr — Flask's official tutorial app (BSD-3), vendored at
+# eval/fixtures/flaskr. No known vulnerabilities, so every scanner finding is a
+# false positive: 35 are `assert` in tests, the rest the documented
+# development placeholders (SECRET_KEY "dev", test passwords), which the
+# tutorial says to override when deploying.
+#
+# It measures noise: there is nothing to recall, so it adds to the false
+# positive count of every method and to no truth case.
+
+[repo]
+name = "flaskr"
+local = "eval/fixtures/flaskr"
+license = "BSD-3-Clause"
+requirements = ["flask==3.1.3", "pytest==9.1.1"]

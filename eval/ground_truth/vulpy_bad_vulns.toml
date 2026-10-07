@@ -1,0 +1,99 @@
+# Ground truth: vulpy "bad" — an intentionally vulnerable Flask app (MIT).
+#
+# Labelling rule, fixed before scoring: a case is a real vulnerability when
+# the upstream README names its class AND the code shows it with input from a
+# request. Where good/ fixes the same function, that is cited as evidence.
+# A finding counts as a hit when it is in the case's file and function and its
+# CWE is one the case accepts. Findings that hit no case are false positives:
+# setup scripts (db.py, db_init.py), the attacker-side tools (brute.py,
+# api_*.py), Flask debug mode and the hard-coded SECRET_KEY are not in the
+# README's list, and good/ keeps the last two.
+#
+# Caveat: labelled by Shrey Chechani with Claude Code on 2026-10-07, AFTER
+# Ravel's output on this repo had been seen. The rule above limits the room
+# for bias, but these labels still need an independent re-check by a team
+# member who did not build reachability or triage (AGENTS.md §6).
+
+[repo]
+name = "vulpy-bad"
+url = "https://github.com/fportantier/vulpy"
+sha = "5249cc8b05a1c37f6b2f757b1cf16a509c327122"
+subdir = "bad"
+license = "MIT"
+requirements = [
+  "click==8.5.0", "cryptography==50.0.2", "flask==3.1.3", "geoip2==5.3.0",
+  "jsonschema==4.26.0", "pyjwt==2.15.1", "pyotp==2.10.0", "qrcode==8.2",
+  "requests==2.34.2",
+]
+
+[[truth]]
+id = "sqli-login"
+file = "libuser.py"
+function = "login"
+cwes = ["CWE-89"]
+class = "SQL injection"
+evidence = "username/password formatted into SELECT; good/ uses a parameterised query"
+
+[[truth]]
+id = "sqli-create"
+file = "libuser.py"
+function = "create"
+cwes = ["CWE-89"]
+class = "SQL injection"
+evidence = "form username/password formatted into INSERT (mod_user.do_create)"
+
+[[truth]]
+id = "sqli-password-change"
+file = "libuser.py"
+function = "password_change"
+cwes = ["CWE-89"]
+class = "SQL injection"
+evidence = "new password and username formatted into UPDATE; good/ rewrites it"
+
+[[truth]]
+id = "weak-api-key"
+file = "libapi.py"
+function = "keygen"
+cwes = ["CWE-330", "CWE-377"]
+class = "Authentication bypass (predictable key kept in world-readable /tmp)"
+evidence = "random.getrandbits key stored as a /tmp file name; good/ issues signed JWTs"
+
+[[truth]]
+id = "auth-bypass-glob"
+file = "libapi.py"
+function = "authenticate"
+cwes = ["CWE-377", "CWE-287"]
+class = "Authentication bypass"
+evidence = "X-APIKEY header goes into a /tmp glob, so '*' matches any user's key; good/ verifies a JWT"
+
+[[truth]]
+id = "session-impersonation"
+file = "libsession.py"
+function = "load"
+cwes = ["CWE-565", "CWE-345", "CWE-502"]
+class = "Session impersonation / insecure deserialization"
+evidence = "session cookie is unsigned base64 JSON; good/ encrypts it with Fernet"
+
+[[truth]]
+id = "xss-posts"
+file = "templates/posts.view.html"
+function = ""
+cwes = ["CWE-79"]
+class = "Cross-site scripting"
+evidence = "post.text rendered with | safe"
+
+[[truth]]
+id = "csrf-posts"
+file = "mod_posts.py"
+function = "do_create"
+cwes = ["CWE-352"]
+class = "Cross-site request forgery"
+evidence = "state-changing POST with no CSRF token"
+
+[[truth]]
+id = "bruteforce-login"
+file = "mod_user.py"
+function = "do_login"
+cwes = ["CWE-307"]
+class = "Authentication brute force"
+evidence = "no attempt limit on login"
