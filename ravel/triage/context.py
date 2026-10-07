@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ravel.core.hashing import content_hash
 from ravel.graph.resolve import GraphResult
-from ravel.models import Finding, Node, NodeKind
+from ravel.models import EdgeKind, Finding, Node, NodeKind
 from ravel.scanners.normalize import LocatedFinding
 
 
@@ -112,7 +112,9 @@ def assemble_finding_context(
     callers: list[str] = []
     if target_node and target_node.id in graph_result.graph:
         for pred in graph_result.graph.predecessors(target_node.id):
-            if pred in nodes_by_id:
+            # A file defines its functions; only a calls edge makes a caller.
+            is_call = graph_result.graph.has_edge(pred, target_node.id, key=EdgeKind.CALLS.value)
+            if pred in nodes_by_id and is_call:
                 pn = nodes_by_id[pred]
                 callers.append(f"{pn.qualified_name} ({pn.file_path}:{pn.start_line})")
 

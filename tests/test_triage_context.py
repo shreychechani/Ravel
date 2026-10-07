@@ -5,6 +5,7 @@ from pathlib import Path
 import networkx as nx
 from ravel.graph.resolve import Coverage, GraphResult
 from ravel.models import Finding, FindingSource, Node, NodeKind, Reachability, StaticEvidence
+from ravel.scanners.run import scan_repo
 from ravel.triage.context import assemble_finding_context
 
 
@@ -85,3 +86,13 @@ def test_assemble_finding_context(tmp_path: Path) -> None:
     assert len(ctx.context_hash) == 64  # valid SHA-256 hex string
     assert len(ctx.callers) == 1
     assert "entry" in ctx.callers[0]
+
+
+def test_defining_file_is_not_listed_as_a_caller() -> None:
+    shop = Path(__file__).parent.parent / "eval" / "fixtures" / "vuln_shop"
+    report = scan_repo(shop)
+    sqli = next(
+        lf for lf in report.findings if lf.node and lf.node.qualified_name == "find_product"
+    )
+    ctx = assemble_finding_context(sqli, report.graph, shop)
+    assert [c.split(" ")[0] for c in ctx.callers] == ["search"]
