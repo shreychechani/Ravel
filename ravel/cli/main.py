@@ -270,7 +270,7 @@ def scan(
         table.add_column("node")
         for lf in shown:
             ev = lf.finding.static_evidence
-            reach_str = ev.reachable.value if ev else "unreachable"
+            reach_str = ev.reachable.value if ev else "unknown"
             reach_style = "green" if reach_str == "reachable" else "yellow" if reach_str == "unknown" else "dim"
             blast_str = str(ev.blast_radius) if ev else "0"
             table.add_row(
