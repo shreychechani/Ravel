@@ -13,8 +13,6 @@ Crucial non-negotiables (PRODUCT.md §6):
 
 from __future__ import annotations
 
-from typing import TypeVar
-
 import networkx as nx
 
 from ravel.core.logging import get_logger
@@ -23,8 +21,6 @@ from ravel.models import Finding, Reachability, StaticEvidence, Trust
 from ravel.scanners.normalize import LocatedFinding
 
 log = get_logger("ravel.triage.reachability")
-
-F = TypeVar("F", Finding, LocatedFinding)
 
 
 def _build_subgraphs(
@@ -48,7 +44,7 @@ def _build_subgraphs(
             resolved_g.add_node(node_id)
 
     # Add edges
-    for u, v, k, data in graph.edges(keys=True, data=True):
+    for u, v, _k, data in graph.edges(keys=True, data=True):
         is_resolved = data.get("resolved", True)
         u_str, v_str = str(u), str(v)
 
@@ -108,17 +104,17 @@ def evaluate_node_reachability(
                 all_reaching_eps.add(ep_id)
 
             # Check resolved graph for clean reachable paths
-            if ep_id in resolved_graph and target in resolved_graph:
-                if nx.has_path(resolved_graph, ep_id, target):
-                    try:
-                        path = nx.shortest_path(resolved_graph, ep_id, target)
-                        if (
-                            best_resolved_path is None
-                            or len(path) < len(best_resolved_path)
-                        ):
-                            best_resolved_path = path
-                    except nx.NetworkXNoPath:
-                        pass
+            if (
+                ep_id in resolved_graph
+                and target in resolved_graph
+                and nx.has_path(resolved_graph, ep_id, target)
+            ):
+                try:
+                    path = nx.shortest_path(resolved_graph, ep_id, target)
+                    if best_resolved_path is None or len(path) < len(best_resolved_path):
+                        best_resolved_path = path
+                except nx.NetworkXNoPath:
+                    pass
 
     if best_resolved_path is not None:
         return StaticEvidence(
@@ -138,10 +134,7 @@ def evaluate_node_reachability(
                 if ep_id in full_graph and nx.has_path(full_graph, ep_id, target):
                     try:
                         path = nx.shortest_path(full_graph, ep_id, target)
-                        if (
-                            best_unknown_path is None
-                            or len(path) < len(best_unknown_path)
-                        ):
+                        if best_unknown_path is None or len(path) < len(best_unknown_path):
                             best_unknown_path = path
                     except nx.NetworkXNoPath:
                         pass
@@ -160,7 +153,7 @@ def evaluate_node_reachability(
     )
 
 
-def analyze_reachability(
+def analyze_reachability[F: (Finding, LocatedFinding)](
     graph_result: GraphResult,
     findings: list[F],
 ) -> list[F]:
@@ -169,11 +162,7 @@ def analyze_reachability(
     Mutates and returns the input findings with ``static_evidence`` attached.
     Supports both ``LocatedFinding`` and raw ``Finding`` models.
     """
-    untrusted_eps = {
-        ep.node_id
-        for ep in graph_result.entry_points
-        if ep.trust is Trust.UNTRUSTED
-    }
+    untrusted_eps = {ep.node_id for ep in graph_result.entry_points if ep.trust is Trust.UNTRUSTED}
 
     resolved_g, full_g = _build_subgraphs(graph_result.graph)
 
@@ -197,33 +186,23 @@ def analyze_reachability(
             target_ids.append(finding.node_id)
 
         if no_entry_points:
-            evidence = StaticEvidence(
-                reachable=Reachability.UNKNOWN, path=[], blast_radius=0
-            )
+            evidence = StaticEvidence(reachable=Reachability.UNKNOWN, path=[], blast_radius=0)
         else:
-            evidence = evaluate_node_reachability(
-                target_ids, untrusted_eps, resolved_g, full_g
-            )
+            evidence = evaluate_node_reachability(target_ids, untrusted_eps, resolved_g, full_g)
         finding.static_evidence = evidence
 
-    reachable_count = sum(
-        1
-        for item in findings
-        if (item.finding.static_evidence.reachable if isinstance(item, LocatedFinding) else item.static_evidence.reachable)  # type: ignore[union-attr]
-        is Reachability.REACHABLE
-    )
-    unknown_count = sum(
-        1
-        for item in findings
-        if (item.finding.static_evidence.reachable if isinstance(item, LocatedFinding) else item.static_evidence.reachable)  # type: ignore[union-attr]
-        is Reachability.UNKNOWN
-    )
-    unreachable_count = sum(
-        1
-        for item in findings
-        if (item.finding.static_evidence.reachable if isinstance(item, LocatedFinding) else item.static_evidence.reachable)  # type: ignore[union-attr]
-        is Reachability.UNREACHABLE
-    )
+    reachable_count = 0
+    unknown_count = 0
+    unreachable_count = 0
+    for item in findings:
+        f = item.finding if isinstance(item, LocatedFinding) else item
+        if f.static_evidence is not None:
+            if f.static_evidence.reachable is Reachability.REACHABLE:
+                reachable_count += 1
+            elif f.static_evidence.reachable is Reachability.UNKNOWN:
+                unknown_count += 1
+            elif f.static_evidence.reachable is Reachability.UNREACHABLE:
+                unreachable_count += 1
 
     log.info(
         "reachability: %d total findings -> %d reachable, %d unknown, %d unreachable",

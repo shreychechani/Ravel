@@ -1,4 +1,4 @@
-"""Run every scanner on a repo and anchor the results on its graph."""
+"""Run every scanner on a repo, reachability filter, and optionally adjudicate with LLM."""
 
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ from ravel.scanners.normalize import (
 )
 from ravel.scanners.osv import OsvScanner
 from ravel.scanners.semgrep import SemgrepScanner
+from ravel.triage.adjudicate import TriageStats, adjudicate_findings
+from ravel.triage.cache import TriageCache
+from ravel.triage.provider import LLMProvider, TokenBudget
 from ravel.triage.ranking import rank_findings
 from ravel.triage.reachability import analyze_reachability
 
@@ -51,6 +54,7 @@ class ScanReport:
     findings: list[LocatedFinding]
     mapping: MappingStats
     groups: list[DuplicateGroup] = field(default_factory=list)
+    triage_stats: TriageStats | None = None
     not_integrated: tuple[FindingSource, ...] = NOT_YET_INTEGRATED
 
 
@@ -59,8 +63,12 @@ def scan_repo(
     venv: Path | None = None,
     scanners: list[Scanner] | None = None,
     graph: GraphResult | None = None,
+    triage_provider: LLMProvider | None = None,
+    token_budget: TokenBudget | None = None,
+    triage_cache: TriageCache | None = None,
 ) -> ScanReport:
-    """Build (or reuse) the graph, run each scanner, normalize, reachability filter, and dedupe."""
+    """Build (or reuse) the graph, run each scanner, normalize, reachability filter,
+    optionally adjudicate via LLM, and rank."""
     root = Path(root).resolve()
     graph = graph or build_graph(root, venv=venv)
     files = sorted({n.file_path for n in graph.nodes if n.kind is NodeKind.FILE})
@@ -81,6 +89,20 @@ def scan_repo(
         mapping.ratio * 100,
     )
     findings = analyze_reachability(graph, findings)
-    findings = rank_findings(findings)
-    return ScanReport(graph, results, findings, mapping, dedupe(findings))
 
+    triage_stats: TriageStats | None = None
+    if triage_provider is not None:
+        budget = token_budget or TokenBudget()
+        findings, triage_stats = adjudicate_findings(
+            findings=findings,
+            graph_result=graph,
+            root=root,
+            provider=triage_provider,
+            budget=budget,
+            cache=triage_cache,
+        )
+
+    findings = rank_findings(findings)
+    return ScanReport(
+        graph, results, findings, mapping, dedupe(findings), triage_stats=triage_stats
+    )

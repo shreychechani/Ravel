@@ -1,10 +1,9 @@
 """``ravel`` CLI.
 
 ``ravel index PATH`` builds the call graph and reports coverage.
-``ravel scan PATH`` runs the security scanners and anchors every finding on a
-graph node. ``ravel osv-db update`` downloads the offline vulnerability
-database — the only Ravel command that uses the network. Later phases add
-reachability and triage.
+``ravel scan PATH`` runs the security scanners, filters findings by reachability,
+optionally performs LLM adjudication, and anchors every finding on a graph node.
+``ravel osv-db update`` downloads the offline vulnerability database.
 """
 
 from __future__ import annotations
@@ -20,11 +19,13 @@ from rich.table import Table
 from ravel.core.logging import configure_logging, get_logger
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
-from ravel.models import EdgeKind, NodeKind
+from ravel.models import EdgeKind, NodeKind, Reachability
 from ravel.scanners.base import ScanStatus
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.osv import default_db_dir, update_db
 from ravel.scanners.run import default_scanners, scan_repo
+from ravel.triage.cache import TriageCache
+from ravel.triage.provider import TokenBudget, create_provider
 
 app = typer.Typer(add_completion=False, help="Ravel — reachability-aware security triage.")
 osv_db_app = typer.Typer(help="Manage the offline OSV vulnerability database.")
@@ -81,7 +82,6 @@ def index(
     import_edges = sum(1 for e in result.edges if e.kind is EdgeKind.IMPORTS and e.resolved)
     unknown_imports = sum(1 for e in result.edges if e.kind is EdgeKind.IMPORTS and not e.resolved)
 
-    # Coverage is the Phase 1 gate: >=80% of call sites resolved (BUILD-PLAN §1).
     cov_pct = cov.ratio * 100
     cov_style = "green" if cov.ratio >= 0.80 else "yellow"
 
@@ -184,15 +184,54 @@ def scan(
     osv_bin: Annotated[
         Path | None, typer.Option("--osv-bin", help="Path to the osv-scanner executable.")
     ] = None,
+    triage: Annotated[
+        bool,
+        typer.Option("--triage/--no-triage", help="Enable LLM triage adjudication on survivors."),
+    ] = False,
+    llm_provider: Annotated[
+        str,
+        typer.Option("--llm-provider", help="LLM provider: 'mock', 'ollama', or 'openai'."),
+    ] = "mock",
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Model name (e.g. 'llama3.2', 'gpt-4o-mini')."),
+    ] = None,
+    token_budget: Annotated[
+        int,
+        typer.Option("--token-budget", help="Maximum token budget before kill switch trips."),
+    ] = 100_000,
+    triage_cache: Annotated[
+        Path | None,
+        typer.Option("--triage-cache", help="Path to triage cache JSON file."),
+    ] = None,
 ) -> None:
-    """Run the security scanners and anchor each finding on a graph node."""
+    """Run the security scanners, reachability filter, and optionally adjudicate findings."""
     configure_logging()
     try:
         scanners = default_scanners(semgrep_config, semgrep_bin, osv_db, osv_bin)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--semgrep-config") from exc
+
+    provider = None
+    budget = None
+    cache = None
+    if triage:
+        try:
+            provider = create_provider(llm_provider, model=model)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--llm-provider") from exc
+        budget = TokenBudget(limit=token_budget)
+        cache = TriageCache(cache_file=triage_cache)
+
     try:
-        report = scan_repo(path, venv=venv, scanners=scanners)
+        report = scan_repo(
+            path,
+            venv=venv,
+            scanners=scanners,
+            triage_provider=provider,
+            token_budget=budget,
+            triage_cache=cache,
+        )
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--venv") from exc
 
@@ -212,47 +251,66 @@ def scan(
             r.detail or "",
         )
     for missing in report.not_integrated:
-        # Never imply full coverage: a scanner we don't run is recall we don't have.
         status_table.add_row(missing.value, "[yellow]not integrated yet[/yellow]", "-", "-", "")
     console.print(status_table)
 
     m = report.mapping
     style = "green" if m.ratio >= 0.95 else "yellow"
-    summary = Table(title="Findings")
+    summary = Table(title="Findings Summary")
     summary.add_column("metric", style="cyan")
     summary.add_column("value", justify="right")
-    summary.add_row("Findings", str(m.total))
+    summary.add_row("Total Findings", str(m.total))
     summary.add_row("Mapped to a node (gate >=95%)", f"[{style}]{m.ratio:.1%}[/{style}]")
     summary.add_row("  |- function / class", str(m.to_def))
     summary.add_row("  |- module level (file node)", str(m.to_file))
     summary.add_row("  |- dependency, linked to its importers", str(m.to_package))
-    summary.add_row(
-        "  |- transitive dependency, via a package that needs it", str(m.via_dependency)
-    )
+    summary.add_row("  |- transitive dependency, via parent package", str(m.via_dependency))
     summary.add_row("  \\- unmapped", str(m.unmapped))
     summary.add_row("Non-Python files (no node; outside the rate)", str(m.non_python))
-    summary.add_row(
-        "Unused deps: nothing imports or needs them (outside)", str(m.unused_dependency)
-    )
-    summary.add_row(
-        "Deps not imported, usage unknown — no env (outside)", str(m.dependency_unknown)
-    )
+    summary.add_row("Unused deps: nothing imports or needs them", str(m.unused_dependency))
+    summary.add_row("Deps not imported, usage unknown — no env", str(m.dependency_unknown))
     summary.add_row("Cross-scanner duplicates", str(cross_scanner_duplicates(report.groups)))
-    
+
     # Reachability summary
     reachable_cnt = sum(
-        1 for f in report.findings if f.finding.static_evidence and f.finding.static_evidence.reachable == "reachable"
+        1
+        for f in report.findings
+        if f.finding.static_evidence
+        and f.finding.static_evidence.reachable is Reachability.REACHABLE
     )
     unknown_cnt = sum(
-        1 for f in report.findings if f.finding.static_evidence and f.finding.static_evidence.reachable == "unknown"
+        1
+        for f in report.findings
+        if f.finding.static_evidence and f.finding.static_evidence.reachable is Reachability.UNKNOWN
     )
     unreachable_cnt = sum(
-        1 for f in report.findings if f.finding.static_evidence and f.finding.static_evidence.reachable == "unreachable"
+        1
+        for f in report.findings
+        if f.finding.static_evidence
+        and f.finding.static_evidence.reachable is Reachability.UNREACHABLE
     )
-    summary.add_row("Reachability", f"[green]{reachable_cnt} reachable[/green] | [yellow]{unknown_cnt} unknown[/yellow] | [dim]{unreachable_cnt} unreachable[/dim]")
+    reach_summary = (
+        f"[green]{reachable_cnt} reachable[/green] | "
+        f"[yellow]{unknown_cnt} unknown[/yellow] | "
+        f"[dim]{unreachable_cnt} unreachable[/dim]"
+    )
+    summary.add_row("Reachability (Phase 3)", reach_summary)
+
+    if report.triage_stats is not None:
+        ts = report.triage_stats
+        triage_text = (
+            f"[red]{ts.real_count} real[/red] | "
+            f"[green]{ts.false_positive_count} false positive[/green] | "
+            f"[yellow]{ts.needs_review_count} needs review[/yellow]"
+        )
+        summary.add_row("LLM Triage (Phase 4)", triage_text)
+        summary.add_row(
+            "Triage LLM calls / cache hits", f"{ts.llm_calls} calls / {ts.cached_hits} cached"
+        )
+        if budget is not None:
+            summary.add_row("Token budget used", f"{budget.total} / {budget.limit} tokens")
 
     cov = report.graph.coverage.ratio
-    # <60% coverage invalidates reachability claims built on this graph (PRODUCT.md §9).
     cov_style = "green" if cov >= 0.80 else "yellow" if cov >= 0.60 else "red"
     summary.add_row("Graph coverage", f"[{cov_style}]{cov:.1%}[/{cov_style}]")
     summary.add_row("Python env", report.graph.environment.describe())
@@ -260,28 +318,59 @@ def scan(
 
     shown = report.findings if limit == 0 else report.findings[:limit]
     if shown:
-        table = Table(title=f"Findings ({len(shown)} of {len(report.findings)})")
+        table = Table(title=f"Ranked Findings ({len(shown)} of {len(report.findings)})")
         table.add_column("rule", style="cyan")
         table.add_column("sev")
         table.add_column("reachability")
-        table.add_column("blast radius", justify="right")
+        table.add_column("blast", justify="right")
+        if triage:
+            table.add_column("verdict")
+            table.add_column("conf", justify="right")
         table.add_column("cwe")
         table.add_column("location")
         table.add_column("node")
         for lf in shown:
             ev = lf.finding.static_evidence
             reach_str = ev.reachable.value if ev else "unknown"
-            reach_style = "green" if reach_str == "reachable" else "yellow" if reach_str == "unknown" else "dim"
+            reach_style = (
+                "green"
+                if reach_str == "reachable"
+                else "yellow"
+                if reach_str == "unknown"
+                else "dim"
+            )
             blast_str = str(ev.blast_radius) if ev else "0"
-            table.add_row(
+
+            row = [
                 lf.finding.rule_id,
                 lf.raw.severity.value,
                 f"[{reach_style}]{reach_str}[/{reach_style}]",
                 blast_str,
-                lf.finding.cwe or "-",
-                _location(lf),
-                _anchor_label(lf),
+            ]
+            if triage:
+                v = lf.finding.verdict or "unadjudicated"
+                v_style = (
+                    "red"
+                    if v == "real"
+                    else "green"
+                    if v == "false_positive"
+                    else "yellow"
+                    if v == "needs_review"
+                    else "dim"
+                )
+                conf_str = (
+                    f"{lf.finding.confidence:.2f}" if lf.finding.confidence is not None else "-"
+                )
+                row.extend([f"[{v_style}]{v}[/{v_style}]", conf_str])
+
+            row.extend(
+                [
+                    lf.finding.cwe or "-",
+                    _location(lf),
+                    _anchor_label(lf),
+                ]
             )
+            table.add_row(*row)
         console.print(table)
 
     if json_out is not None:
@@ -316,7 +405,9 @@ def scan(
                     "line": lf.raw.line,
                     "end_line": lf.raw.end_line,
                     "severity": lf.raw.severity.value,
-                    "confidence": lf.raw.confidence,
+                    "scanner_confidence": lf.raw.confidence,
+                    "verdict": lf.finding.verdict,
+                    "reasoning": lf.finding.reasoning,
                     "message": lf.raw.message,
                     "package": lf.raw.package,
                     "package_version": lf.raw.package_version,
@@ -328,6 +419,19 @@ def scan(
                 for lf in report.findings
             ],
         }
+        if report.triage_stats is not None:
+            ts = report.triage_stats
+            payload["triage_stats"] = {
+                "total": ts.total,
+                "survivors_evaluated": ts.survivors_evaluated,
+                "cached_hits": ts.cached_hits,
+                "llm_calls": ts.llm_calls,
+                "unreachable_skipped": ts.unreachable_skipped,
+                "budget_exhausted": ts.budget_exhausted,
+                "real_count": ts.real_count,
+                "false_positive_count": ts.false_positive_count,
+                "needs_review_count": ts.needs_review_count,
+            }
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote %d findings to %s", len(report.findings), json_out)
 
@@ -359,6 +463,7 @@ def osv_db_update(
     osv_bin: Annotated[
         Path | None, typer.Option("--osv-bin", help="Path to the osv-scanner executable.")
     ] = None,
+    host: Annotated[Path | None, typer.Option("--host", hidden=True)] = None,
 ) -> None:
     """Download the PyPI OSV database for offline scans (uses the network)."""
     configure_logging()
