@@ -35,6 +35,7 @@ import jedi
 import networkx as nx
 
 from ravel.core.logging import get_logger
+from ravel.deps.distributions import installed_versions
 from ravel.graph.entrypoints import (
     DJANGO_VIEW_METHODS,
     ViewRef,
@@ -458,6 +459,11 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
         len(entry_points),
         cov.ratio * 100,
     )
+    # Which release each third-party call goes into (None: stdlib, or no env).
+    versions = installed_versions(env.site_packages)
+    external_refs = [
+        r.model_copy(update={"version": versions.get(r.package)}) for r in external_refs
+    ]
     return GraphResult(
         graph=graph,
         nodes=nodes,

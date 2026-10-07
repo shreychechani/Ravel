@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ravel.deps.distributions import import_names, required_by, requirements_graph
+from ravel.deps.distributions import (
+    import_names,
+    installed_versions,
+    required_by,
+    requirements_graph,
+)
 
 
 def test_top_level_txt_names_renamed_packages(tmp_path: Path) -> None:
@@ -43,3 +48,11 @@ def test_required_by_is_transitive_and_skips_extras(tmp_path: Path) -> None:
     graph = requirements_graph([tmp_path])
     assert required_by("sqlparse", graph) == {"django", "app-kit"}
     assert required_by("bcrypt", graph) == set()  # only an optional extra
+
+
+def test_installed_versions_map_import_names_to_releases(tmp_path: Path) -> None:
+    yaml = tmp_path / "PyYAML-6.0.1.dist-info"
+    yaml.mkdir()
+    (yaml / "top_level.txt").write_text("yaml\n", encoding="utf-8")
+    (tmp_path / "Flask-3.1.3.dist-info").mkdir()  # no metadata: normalized name
+    assert installed_versions([tmp_path]) == {"yaml": "6.0.1", "flask": "3.1.3"}

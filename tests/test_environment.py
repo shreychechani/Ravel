@@ -90,5 +90,12 @@ def test_third_party_calls_resolve_against_the_repo_venv(flask_repo: Path) -> No
     assert with_env.coverage.unresolved == 0
     assert with_env.coverage.internal == without.coverage.internal  # in-repo edges unchanged
     assert {r.package for r in with_env.external_refs} >= {"flask"}
+    assert {r.version for r in with_env.external_refs if r.package == "flask"} == {None}
+
+    (
+        flask_repo / ".venv" / "lib" / "python3.12" / "site-packages" / "Flask-3.1.3.dist-info"
+    ).mkdir()
+    versioned = build_graph(flask_repo)
+    assert {r.version for r in versioned.external_refs if r.package == "flask"} == {"3.1.3"}
     # The venv is resolved against, never indexed as source.
     assert not any(".venv" in n.file_path for n in with_env.nodes)

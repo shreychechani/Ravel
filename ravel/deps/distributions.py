@@ -63,6 +63,27 @@ def import_names(distribution: str, site_packages: Iterable[Path] = ()) -> set[s
     return {wanted.replace("-", "_")}
 
 
+def installed_versions(site_packages: Iterable[Path]) -> dict[str, str]:
+    """Top-level import name → the installed distribution's version.
+
+    Read from ``*.dist-info`` directory names (``Flask-3.1.3.dist-info``), so
+    ``ExternalRef.version`` says which release the code calls into — what the
+    dependency report needs (PRODUCT.md §4). The first site-packages wins, as
+    on ``sys.path``.
+    """
+    versions: dict[str, str] = {}
+    for site in site_packages:
+        for dist_info in sorted(site.glob("*.dist-info")):
+            stem = dist_info.name[: -len(".dist-info")]
+            if "-" not in stem:
+                continue
+            name, version = stem.rsplit("-", 1)
+            names = _from_metadata(dist_info) or {canonical(name).replace("-", "_")}
+            for module in names:
+                versions.setdefault(module, version)
+    return versions
+
+
 _REQUIRES = re.compile(r"^Requires-Dist:\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
