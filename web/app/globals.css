@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/* Ravel palette: navy ink, warm paper, orange = reachable, blue = graph,
+   amber = unknown, grey = unreachable. System fonts only: the build and the
+   page stay offline (PRODUCT.md §6, local-first). */
+@theme {
+  --color-ink: #14213d;
+  --color-ink-2: #1e2d4f;
+  --color-paper: #f7f5f0;
+  --color-paper-2: #ece8df;
+  --color-card: #fffdf8;
+  --color-line: #e2ddd2;
+  --color-muted: #5b6270;
+  --color-reach: #b85a12;
+  --color-reach-soft: #fce3cb;
+  --color-unknown: #8a6d00;
+  --color-unknown-soft: #fbf0c7;
+  --color-unreach: #6b7280;
+  --color-unreach-soft: #eef0f3;
+  --color-graph: #2f5fb3;
+  --color-graph-soft: #dce6f7;
+  --color-real: #b3261e;
+  --color-real-soft: #f9dedc;
+  --color-safe: #1f6b45;
+  --color-safe-soft: #ddf0e4;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
