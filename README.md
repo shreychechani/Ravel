@@ -4,7 +4,32 @@
 
 Ravel builds a knowledge graph of a Python codebase, then uses it to answer a question scanners can't: *which findings actually matter?* It does this by tracing whether flagged code is reachable from an untrusted entry point — turning a wall of ~200 scanner alerts into a short, ranked list of the ones that are real.
 
-> **Status:** pre-build. Design is settled; implementation has not started.
+> **Status (2026-10-07):** Phases 0–4 built and the web view works. The Phase 3
+> checkpoint passes (precision ×8.57, recall retained 100% on two labelled repos);
+> LLM triage ships disabled because it does not yet beat reachability alone.
+> Details: [`docs/BUILD-PLAN.md`](./docs/BUILD-PLAN.md).
+
+---
+
+## Quick start
+
+```bash
+uv sync                                         # Python 3.12, via uv
+uv run ravel scan eval/fixtures/vuln_shop       # scanners → reachability → ranked list
+uv run ravel scan https://github.com/owner/repo --ref <commit>   # any git URL
+
+npm --prefix web install && npm --prefix web run build
+uv run ravel serve eval/fixtures/vuln_shop      # web view on http://127.0.0.1:8765
+
+uv run python -m eval.run                       # precision + recall vs. baselines
+```
+
+Give `--venv <the repo's virtualenv>` so third-party calls resolve (coverage is
+printed on every run). Optional tools are reported, never silently skipped:
+`gitleaks`, `osv-scanner` (+ `ravel osv-db update`), `semgrep` (with your own
+`--semgrep-config`). LLM features (`--triage`, `ravel summarize`) default to an
+offline mock; use `--llm-provider ollama --model llama3.2:3b` for a local model
+or `--llm-provider openai` with your own key. See [`docs/DEMO.md`](./docs/DEMO.md).
 
 ---
 
@@ -61,9 +86,9 @@ The **reachability filter is deterministic and LLM-free** — it's the core of t
 |---|---|
 | Parsing | tree-sitter (`py-tree-sitter`) |
 | Name resolution | Jedi + `ast` |
-| Import graph | `grimp` |
+| Import graph | Python `ast` |
 | Graph ops | NetworkX |
-| Storage | Postgres + pgvector |
+| Storage | Postgres + pgvector (planned; scans are in-memory + JSON today) |
 | Scanners | Semgrep OSS · Bandit · gitleaks · OSV-Scanner |
 | LLM | Small model for summaries, larger for triage — swappable (local / BYO-key) |
 | API | FastAPI |
@@ -89,21 +114,22 @@ The **reachability filter is deterministic and LLM-free** — it's the core of t
 
 ---
 
-## Repository layout (planned)
+## Repository layout
 
 ```
-/src
-  /ingest       clone, language detect, tree-sitter parsing
-  /graph        node/edge construction, resolution, entry points
-  /scanners     wrappers + normalization to Finding schema
-  /triage       reachability, context assembly, LLM verdict, ranking
-  /summarize    bottom-up summaries, hash-based caching
-  /deps         deprecated API + outdated dependency analysis
-  /store        Postgres models, migrations
-  /cli          entry point
-/web            Next.js frontend
-/eval           benchmark repos, ground truth, one-command runner
-/docs
+ravel/
+  ingest/       file discovery, git URL cloning
+  graph/        tree-sitter parse, Jedi resolution, imports, entry points, env discovery
+  scanners/     Bandit · Semgrep · OSV-Scanner · gitleaks wrappers + normalization
+  triage/       reachability, ranking, context assembly, LLM providers, verdict cache
+  summarize/    bottom-up summaries, content-hash cache
+  deps/         installed distributions, import names, versions
+  api/          ravel serve (FastAPI, localhost only)
+  report.py     the scan report the CLI --json and the web view share
+  cli/          ravel index · scan · serve · summarize · osv-db
+web/            Next.js + react-flow + dagre web view (static export)
+eval/           fixtures, ground truth, eval.run harness, graph checks
+docs/
 ```
 
 ---
