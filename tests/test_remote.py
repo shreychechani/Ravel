@@ -5,6 +5,7 @@ Uses a local repository over ``file://`` so no network is needed.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -82,4 +83,5 @@ def test_cli_indexes_a_url(origin: tuple[str, str, str], tmp_path: Path) -> None
 def test_ref_without_url_is_refused() -> None:
     result = CliRunner().invoke(app, ["index", str(SAMPLE), "--ref", "main"])
     assert result.exit_code != 0
-    assert "--ref only applies to a git URL" in result.output
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)  # CI forces colour
+    assert "--ref only applies to a git URL" in " ".join(plain.split())
