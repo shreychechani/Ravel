@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ravel.graph.resolve import GraphResult
-from ravel.models import Node, NodeKind
+from ravel.models import EdgeKind, Node, NodeKind
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.run import ScanReport
 from ravel.triage.provider import TokenBudget
@@ -93,7 +93,12 @@ def _finding_entry(
     ]
     callers: list[str] = []
     if lf.node is not None and lf.node.id in graph.graph:
-        callers = sorted(p for p in graph.graph.predecessors(lf.node.id) if p in nodes)
+        # Only real callers: a file "defines" its functions, it does not call them.
+        callers = sorted(
+            p
+            for p in graph.graph.predecessors(lf.node.id)
+            if p in nodes and graph.graph.has_edge(p, lf.node.id, key=EdgeKind.CALLS.value)
+        )
     return {
         **lf.finding.model_dump(),
         "file": lf.raw.rel_path,

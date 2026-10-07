@@ -40,7 +40,8 @@ def test_reachable_finding_has_path_hops_code_and_callers(report: dict[str, Any]
     ]
     assert any("SELECT" in line for line in sqli["code"]["lines"])
     assert sqli["code"]["highlight"][0] == sqli["line"]
-    assert "search" in {report["nodes"][c]["name"] for c in sqli["callers"]}
+    callers = {report["nodes"][c]["name"] for c in sqli["callers"]}
+    assert callers == {"search"}  # the defining file (shop.db) is not a caller
 
 
 def test_unreachable_finding_has_no_path(report: dict[str, Any]) -> None:
