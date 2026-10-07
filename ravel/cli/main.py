@@ -3,6 +3,7 @@
 ``ravel index PATH`` builds the call graph and reports coverage.
 ``ravel scan PATH`` runs the security scanners, filters findings by reachability,
 optionally performs LLM adjudication, and anchors every finding on a graph node.
+``ravel serve PATH`` opens the web view of a scan on localhost.
 ``ravel osv-db update`` downloads the offline vulnerability database.
 """
 
@@ -16,6 +17,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from ravel.api.server import ReportStore, create_app, load_report
 from ravel.core.logging import configure_logging, get_logger
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
@@ -378,6 +380,86 @@ def scan(
         payload = build_report(report, path, budget)
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote %d findings to %s", len(report.findings), json_out)
+
+
+_DEFAULT_UI_DIR = Path(__file__).resolve().parents[2] / "web" / "out"
+
+
+@app.command()
+def serve(
+    target: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            readable=True,
+            help="A Python repo to scan, or a report written by `ravel scan --json`.",
+        ),
+    ],
+    venv: _VenvOpt = None,
+    port: Annotated[int, typer.Option(help="Port to listen on (127.0.0.1 only).")] = 8765,
+    triage: Annotated[
+        bool, typer.Option("--triage/--no-triage", help="Run LLM triage on the first scan.")
+    ] = False,
+    llm_provider: Annotated[
+        str, typer.Option("--llm-provider", help="LLM provider: 'mock', 'ollama', or 'openai'.")
+    ] = "mock",
+    model: Annotated[str | None, typer.Option("--model", help="Model name.")] = None,
+    token_budget: Annotated[
+        int, typer.Option("--token-budget", help="Token budget per scan before the kill switch.")
+    ] = 100_000,
+    triage_cache: Annotated[
+        Path | None, typer.Option("--triage-cache", help="Path to triage cache JSON file.")
+    ] = None,
+    semgrep_config: Annotated[
+        list[str] | None,
+        typer.Option("--semgrep-config", help="Local Semgrep rules file/dir (repeatable)."),
+    ] = None,
+    osv_db: Annotated[
+        Path | None,
+        typer.Option("--osv-db", help="Offline OSV database dir (default: $RAVEL_OSV_DB)."),
+    ] = None,
+    ui_dir: Annotated[
+        Path | None, typer.Option("--ui-dir", help="Built web view (default: web/out).")
+    ] = None,
+) -> None:
+    """Open the web view of a scan on http://127.0.0.1 (local only, read-only)."""
+    import uvicorn
+
+    configure_logging()
+    if target.is_file():
+        try:
+            store = ReportStore(report=load_report(target))
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise typer.BadParameter(str(exc), param_hint="TARGET") from exc
+    else:
+        try:
+            scanners = default_scanners(semgrep_config, None, osv_db, None)
+            create_provider(llm_provider, model=model)  # fail fast on a bad provider
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        graph = build_graph(target, venv=venv)  # built once; rescans reuse it
+
+        def run_scan(with_triage: bool) -> dict[str, object]:
+            provider = create_provider(llm_provider, model=model) if with_triage else None
+            budget = TokenBudget(limit=token_budget) if with_triage else None
+            cache = TriageCache(cache_file=triage_cache) if with_triage else None
+            report = scan_repo(
+                target,
+                venv=venv,
+                scanners=scanners,
+                graph=graph,
+                triage_provider=provider,
+                token_budget=budget,
+                triage_cache=cache,
+            )
+            return build_report(report, target, budget)
+
+        store = ReportStore(scan=run_scan)
+        store.rescan(triage)  # the page opens on a finished scan
+
+    url = f"http://127.0.0.1:{port}"
+    console.print(f"Ravel web view: [bold]{url}[/bold]  (Ctrl+C to stop)")
+    uvicorn.run(create_app(store, ui_dir or _DEFAULT_UI_DIR), host="127.0.0.1", port=port)
 
 
 def _location(lf: LocatedFinding) -> str:
