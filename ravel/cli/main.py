@@ -20,6 +20,7 @@ from ravel.core.logging import configure_logging, get_logger
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
 from ravel.models import EdgeKind, NodeKind, Reachability
+from ravel.report import build_report
 from ravel.scanners.base import ScanStatus
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.osv import default_db_dir, update_db
@@ -374,64 +375,7 @@ def scan(
         console.print(table)
 
     if json_out is not None:
-        payload = {
-            "scanners": [
-                {
-                    "source": r.source.value,
-                    "status": r.status.value,
-                    "version": r.version,
-                    "errors": r.errors,
-                    "detail": r.detail,
-                }
-                for r in report.results
-            ],
-            "not_integrated": [s.value for s in report.not_integrated],
-            "mapping": {
-                "total": m.total,
-                "to_def": m.to_def,
-                "to_file": m.to_file,
-                "unmapped": m.unmapped,
-                "non_python": m.non_python,
-                "to_package": m.to_package,
-                "via_dependency": m.via_dependency,
-                "unused_dependency": m.unused_dependency,
-                "dependency_unknown": m.dependency_unknown,
-                "ratio": m.ratio,
-            },
-            "findings": [
-                {
-                    **lf.finding.model_dump(),
-                    "file": lf.raw.rel_path,
-                    "line": lf.raw.line,
-                    "end_line": lf.raw.end_line,
-                    "severity": lf.raw.severity.value,
-                    "scanner_confidence": lf.raw.confidence,
-                    "verdict": lf.finding.verdict,
-                    "reasoning": lf.finding.reasoning,
-                    "message": lf.raw.message,
-                    "package": lf.raw.package,
-                    "package_version": lf.raw.package_version,
-                    "fixed_in": lf.raw.fixed_in,
-                    "aliases": list(lf.raw.aliases),
-                    "anchors": [n.id for n in lf.anchors],
-                    "via": list(lf.via),
-                }
-                for lf in report.findings
-            ],
-        }
-        if report.triage_stats is not None:
-            ts = report.triage_stats
-            payload["triage_stats"] = {
-                "total": ts.total,
-                "survivors_evaluated": ts.survivors_evaluated,
-                "cached_hits": ts.cached_hits,
-                "llm_calls": ts.llm_calls,
-                "unreachable_skipped": ts.unreachable_skipped,
-                "budget_exhausted": ts.budget_exhausted,
-                "real_count": ts.real_count,
-                "false_positive_count": ts.false_positive_count,
-                "needs_review_count": ts.needs_review_count,
-            }
+        payload = build_report(report, path, budget)
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote %d findings to %s", len(report.findings), json_out)
 
