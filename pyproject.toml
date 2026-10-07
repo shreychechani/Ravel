@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
-    "tree-sitter>=0.23",
+    "tree-sitter>=0.23,<0.26",  # 0.26.0 segfaults walking real code (eval/fixtures/pygoat_views)
     "tree-sitter-python>=0.23",
     "typer>=0.12",
     "rich>=13.7",
@@ -42,7 +42,7 @@ packages = ["ravel"]
 line-length = 100
 src = ["ravel", "tests"]
 # Vendored third-party code kept byte-identical to upstream, and planted-bug fixtures.
-extend-exclude = ["eval/benchmarks", "eval/fixtures/flaskr", "eval/fixtures/vuln_shop"]
+extend-exclude = ["eval/benchmarks", "eval/fixtures/flaskr", "eval/fixtures/vuln_shop", "eval/fixtures/pygoat_views"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
