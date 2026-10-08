@@ -14,6 +14,7 @@ a ref needs history, so the copy is deepened first.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 from git import GitCommandError, Repo
@@ -26,8 +27,16 @@ log = get_logger("ravel.ingest.remote")
 _REMOTE_PREFIXES = ("https://", "http://", "ssh://", "git://", "git@", "file://")
 
 
+def normalize_target(target: str) -> str:
+    """Trim it, and accept ``github.com/owner/repo`` as shorthand for its https URL."""
+    target = target.strip()
+    if target.startswith(("github.com/", "www.github.com/", "gitlab.com/")):
+        return f"https://{target.removeprefix('www.')}"
+    return target
+
+
 def is_remote(target: str) -> bool:
-    return target.startswith(_REMOTE_PREFIXES)
+    return normalize_target(target).startswith(_REMOTE_PREFIXES)
 
 
 def repo_cache() -> Path:
@@ -45,10 +54,14 @@ def fetch_repo(url: str, ref: str | None = None, cache: Path | None = None) -> P
     if not (dest / ".git").is_dir():
         dest.parent.mkdir(parents=True, exist_ok=True)
         log.info("cloning %s into %s", url, dest)
-        if ref is None:
-            Repo.clone_from(url, dest, depth=1)
-        else:
-            Repo.clone_from(url, dest)
+        try:
+            if ref is None:
+                Repo.clone_from(url, dest, depth=1)
+            else:
+                Repo.clone_from(url, dest)
+        except GitCommandError:
+            shutil.rmtree(dest, ignore_errors=True)  # a half clone would poison the cache
+            raise
     repo = Repo(dest)
     if ref is not None:
         try:
@@ -61,3 +74,23 @@ def fetch_repo(url: str, ref: str | None = None, cache: Path | None = None) -> P
             repo.git.checkout(ref)
     log.info("scanning %s at %s", url, repo.head.commit.hexsha[:12])
     return dest
+
+
+def resolve_target(target: str, ref: str | None = None, cache: Path | None = None) -> Path:
+    """A local repo directory for ``target``: the folder itself, or a clone of a URL.
+
+    Raises ``ValueError`` with a message fit to show the user.
+    """
+    target = normalize_target(target)
+    if is_remote(target):
+        try:
+            return fetch_repo(target, ref, cache)
+        except GitCommandError as exc:
+            detail = (exc.stderr or str(exc)).strip().splitlines()[-1:] or ["git failed"]
+            raise ValueError(f"could not clone {target}: {detail[0]}") from exc
+    if ref is not None:
+        raise ValueError("--ref only applies to a git URL")
+    path = Path(target).expanduser()
+    if not path.is_dir():
+        raise ValueError(f"{target} is not a directory or a git URL")
+    return path
