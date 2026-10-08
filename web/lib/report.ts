@@ -71,6 +71,8 @@ export interface GraphEdge {
 export interface Report {
   report_version: number;
   repo: string;
+  target?: string | null; // what the user opened: a git URL or a folder
+  ref?: string | null;
   graph: {
     nodes: number;
     edges: number;
@@ -124,21 +126,32 @@ export const VERDICT_STYLE: Record<Verdict, string> = {
 
 export const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
-export async function fetchReport(): Promise<Report> {
+/** The current report, or null when the server has no repo open yet. */
+export async function fetchReport(): Promise<Report | null> {
   const res = await fetch("/api/report");
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`report request failed (${res.status})`);
   return res.json();
 }
 
-export async function rescan(triage: boolean): Promise<Report> {
-  const res = await fetch("/api/scan", {
+async function post(url: string, body: unknown): Promise<Report> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ triage }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? `scan failed (${res.status})`);
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail ?? `request failed (${res.status})`);
   }
   return res.json();
+}
+
+/** Clone (for a URL) or read (for a folder), index and scan another repository. */
+export function openRepo(target: string, ref?: string, venv?: string): Promise<Report> {
+  return post("/api/open", { target, ref: ref || null, venv: venv || null });
+}
+
+export function rescan(triage: boolean): Promise<Report> {
+  return post("/api/scan", { triage });
 }

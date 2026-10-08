@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-import { fetchReport, reachOf, rescan, type Report } from "@/lib/report";
+import { fetchReport, openRepo, reachOf, rescan, type Report } from "@/lib/report";
 import { CodeGraph } from "./CodeGraph";
 import { FindingDetail } from "./FindingDetail";
 import { FindingList, type ReachFilter } from "./FindingList";
+import { RepoBar } from "./RepoBar";
 import { ScannerStrip, Summary } from "./Summary";
 
 const FILTERS: ReachFilter[] = ["all", "reachable", "unknown", "unreachable"];
@@ -13,6 +14,7 @@ const FILTERS: ReachFilter[] = ["all", "reachable", "unknown", "unreachable"];
 export function RavelApp() {
   const [report, setReport] = useState<Report | null>(null);
   const [canRescan, setCanRescan] = useState(false);
+  const [canOpen, setCanOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>("Loading scan…");
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ReachFilter>("all");
@@ -24,13 +26,34 @@ export function RavelApp() {
   useEffect(() => {
     fetch("/api/health")
       .then((r) => r.json())
-      .then((h) => setCanRescan(Boolean(h.can_rescan)))
+      .then((h) => {
+        setCanRescan(Boolean(h.can_rescan));
+        setCanOpen(Boolean(h.can_open));
+      })
       .catch(() => setCanRescan(false));
     fetchReport()
       .then(setReport)
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(null));
   }, []);
+
+  const open = (target: string, ref: string, venv: string) => {
+    const remote = /^(https?:|git@|ssh:|git:|file:|(www\.)?github\.com\/|gitlab\.com\/)/.test(target);
+    setBusy(remote ? `Cloning and scanning ${target}… (a first clone can take a minute)` : `Scanning ${target}…`);
+    setError(null);
+    openRepo(target, ref, venv)
+      .then((r) => {
+        setReport(r);
+        setCanRescan(true);
+        setSelected(null);
+        setFilter("all");
+        setQuery("");
+        setGraphFocus(null);
+        setTab("findings");
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(null));
+  };
 
   const run = (triage: boolean) => {
     setBusy(triage ? "Asking the model about reachable findings…" : "Rescanning…");
@@ -61,8 +84,13 @@ export function RavelApp() {
           <span className="text-3xl font-bold tracking-tight">Ravel</span>
           <span className="text-sm text-muted">which warnings actually matter</span>
         </div>
-        {report && (
-          <span className="rounded-full bg-paper-2 px-3 py-1 font-mono text-sm">{report.repo}</span>
+        {report && canOpen && (
+          <div className="min-w-[320px] flex-1">
+            <RepoBar key={report.target ?? report.repo} initial={report.target ?? report.repo} busy={!!busy} onOpen={open} />
+          </div>
+        )}
+        {report && !canOpen && (
+          <span className="rounded-full bg-paper-2 px-3 py-1 font-mono text-sm">{report.target ?? report.repo}</span>
         )}
         <div className="ml-auto flex items-center gap-2">
           {busy && <span className="text-sm text-muted">{busy}</span>}
@@ -87,6 +115,19 @@ export function RavelApp() {
 
       {error && (
         <div className="rounded-xl border border-real bg-real-soft px-4 py-3 text-sm text-real">{error}</div>
+      )}
+
+      {!report && canOpen && (
+        <section className="mx-auto mt-10 flex w-full max-w-3xl flex-col gap-6 rounded-3xl border border-line bg-card p-10 shadow-sm">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-3xl font-bold">Which security warnings actually matter?</h1>
+            <p className="text-muted">
+              Paste a GitHub URL or a local folder. Ravel maps the code, runs the scanners, and shows which warnings an
+              attacker can actually reach. It runs on this machine: a URL is cloned locally, never uploaded.
+            </p>
+          </div>
+          <RepoBar busy={!!busy} onOpen={open} large />
+        </section>
       )}
 
       {report && (
