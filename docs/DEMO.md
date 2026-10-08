@@ -51,10 +51,11 @@ Open http://127.0.0.1:8765, then:
    the code panel highlights the SQL line.
 3. Click **backup** (unreachable): "No call path leads here from any of the
    4 untrusted entry points". It is still listed, just ranked lower.
-4. Open the **Code graph** tab: the whole codebase as one map, a box per
-   file. Orange = web routes, red = reachable warnings, the orange outline is
-   the attack surface ("7 of 8 functions reachable"). Click `find_product`
-   to see its caller, or use "Show in code graph" on any warning.
+4. Open the **Code graph** tab, laid out like Arcflow: folders as coloured
+   hulls, functions as circles. Dashed rings are web entry points, red rings are
+   reachable warnings. Switch **Color by → Risk** to light up the attack
+   surface, pick **Files graph** at the top for the file-level view, and click a
+   circle (or a warning on the right) to see who calls it and what it calls.
 5. Press **Run AI review** (~20 s the first time): only the 3 reachable
    findings go to the local model; each gets a verdict and reasoning.
 
