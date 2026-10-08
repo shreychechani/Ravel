@@ -15,15 +15,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from git import GitCommandError
 from rich.console import Console
 from rich.table import Table
 
-from ravel.api.server import ReportStore, create_app, load_report
+from ravel.api.server import ReportStore, ScanSettings, Workspace, create_app, load_report
 from ravel.core.logging import configure_logging, get_logger
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
-from ravel.ingest.remote import fetch_repo, is_remote
+from ravel.ingest.remote import is_remote, resolve_target
 from ravel.models import EdgeKind, NodeKind, Reachability
 from ravel.report import build_report
 from ravel.scanners.base import ScanStatus
@@ -58,17 +57,11 @@ _RefOpt = Annotated[
 
 def _resolve_target(target: str, ref: str | None) -> Path:
     """A local repo directory: the path itself, or a cached clone of a git URL."""
-    if is_remote(target):
-        try:
-            return fetch_repo(target, ref)
-        except GitCommandError as exc:
-            raise typer.BadParameter(f"could not clone {target}: {exc}") from exc
-    if ref is not None:
-        raise typer.BadParameter("--ref only applies to a git URL", param_hint="--ref")
-    path = Path(target)
-    if not path.is_dir():
-        raise typer.BadParameter(f"{target} is not a directory or a git URL")
-    return path
+    try:
+        return resolve_target(target, ref)
+    except ValueError as exc:
+        hint = "--ref" if "--ref" in str(exc) else None
+        raise typer.BadParameter(str(exc), param_hint=hint) from exc
 
 
 @app.command()
@@ -463,11 +456,12 @@ _DEFAULT_UI_DIR = Path(__file__).resolve().parents[2] / "web" / "out"
 @app.command()
 def serve(
     target: Annotated[
-        str,
+        str | None,
         typer.Argument(
-            help="A Python repo or git URL to scan, or a report written by `ravel scan --json`.",
+            help="A Python repo or git URL to scan, or a report written by `ravel scan --json`. "
+            "Leave it out to choose a repo in the browser.",
         ),
-    ],
+    ] = None,
     venv: _VenvOpt = None,
     port: Annotated[int, typer.Option(help="Port to listen on (127.0.0.1 only).")] = 8765,
     triage: Annotated[
@@ -500,37 +494,26 @@ def serve(
     import uvicorn
 
     configure_logging()
-    if not is_remote(target) and Path(target).is_file():
+    try:
+        scanners = default_scanners(semgrep_config, None, osv_db, None)
+        create_provider(llm_provider, model=model)  # fail fast on a bad provider
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    workspace = Workspace(ScanSettings(scanners, llm_provider, model, token_budget, triage_cache))
+
+    if target is not None and not is_remote(target) and Path(target).is_file():
         try:
-            store = ReportStore(report=load_report(Path(target)))
+            store = ReportStore(report=load_report(Path(target)), workspace=workspace)
         except (ValueError, json.JSONDecodeError) as exc:
             raise typer.BadParameter(str(exc), param_hint="TARGET") from exc
     else:
-        try:
-            scanners = default_scanners(semgrep_config, None, osv_db, None)
-            create_provider(llm_provider, model=model)  # fail fast on a bad provider
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from exc
-        root = _resolve_target(target, ref)
-        graph = build_graph(root, venv=venv)  # built once; rescans reuse it
-
-        def run_scan(with_triage: bool) -> dict[str, object]:
-            provider = create_provider(llm_provider, model=model) if with_triage else None
-            budget = TokenBudget(limit=token_budget) if with_triage else None
-            cache = TriageCache(cache_file=triage_cache) if with_triage else None
-            report = scan_repo(
-                root,
-                venv=venv,
-                scanners=scanners,
-                graph=graph,
-                triage_provider=provider,
-                token_budget=budget,
-                triage_cache=cache,
-            )
-            return build_report(report, root, budget)
-
-        store = ReportStore(scan=run_scan)
-        store.rescan(triage)  # the page opens on a finished scan
+        store = ReportStore(workspace=workspace)
+        if target is not None:
+            try:
+                workspace.open(target, ref, venv)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="TARGET") from exc
+            store.rescan(triage)  # the page opens on a finished scan
 
     url = f"http://127.0.0.1:{port}"
     console.print(f"Ravel web view: [bold]{url}[/bold]  (Ctrl+C to stop)")

@@ -8,8 +8,9 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from ravel.api.server import ReportStore, create_app, load_report
+from ravel.api.server import ReportStore, ScanSettings, Workspace, create_app, load_report
 from ravel.report import build_report
+from ravel.scanners.bandit import BanditScanner
 from ravel.scanners.run import scan_repo
 from ravel.triage.provider import MockProvider, TokenBudget
 
@@ -42,7 +43,8 @@ def test_rescan_with_triage_judges_only_survivors(client: TestClient) -> None:
     stats = data["triage_stats"]
     assert stats["survivors_evaluated"] == 3  # the three reachable findings
     assert stats["unreachable_skipped"] == 5
-    assert client.get("/api/health").json() == {"ok": True, "can_rescan": True}
+    health = client.get("/api/health").json()
+    assert health["ok"] and health["can_rescan"] and not health["can_open"]
 
 
 def test_report_file_mode_refuses_rescan(tmp_path: Path) -> None:
@@ -67,3 +69,38 @@ def test_serves_built_ui_or_explains_how_to_build_it(tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text("<p>ravel ui</p>", encoding="utf-8")
     built = TestClient(create_app(store, ui_dir=tmp_path))
     assert "ravel ui" in built.get("/").text
+
+
+def _workspace_client() -> TestClient:
+    workspace = Workspace(ScanSettings(scanners=[BanditScanner()]))
+    return TestClient(create_app(ReportStore(workspace=workspace)))
+
+
+def test_page_can_open_a_repo_typed_by_the_user() -> None:
+    client = _workspace_client()
+    assert client.get("/api/report").status_code == 404  # nothing opened yet
+    assert client.get("/api/health").json()["can_open"] is True
+
+    opened = client.post("/api/open", json={"target": str(SHOP)})
+    assert opened.status_code == 200, opened.text
+    data = opened.json()
+    assert data["target"] == str(SHOP) and data["repo"] == "vuln_shop"
+    assert client.get("/api/health").json()["target"] == str(SHOP)
+    assert client.post("/api/scan", json={"triage": False}).status_code == 200
+
+
+def test_open_reports_bad_targets_as_400() -> None:
+    client = _workspace_client()
+    bad = client.post("/api/open", json={"target": "/no/such/folder"})
+    assert bad.status_code == 400
+    assert "not a directory or a git URL" in bad.json()["detail"]
+    ref = client.post("/api/open", json={"target": str(SHOP), "ref": "main"})
+    assert ref.status_code == 400
+
+
+def test_write_endpoints_take_json_only() -> None:
+    client = _workspace_client()
+    form = client.post(
+        "/api/open", content=f"target={SHOP}", headers={"content-type": "text/plain"}
+    )
+    assert form.status_code in (415, 422)
