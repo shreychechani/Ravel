@@ -20,6 +20,7 @@ uv run ravel scan https://github.com/owner/repo --ref <commit>   # any git URL
 
 npm --prefix web install && npm --prefix web run build
 uv run ravel serve eval/fixtures/vuln_shop      # web view on http://127.0.0.1:8765
+uv run ravel serve                              # …or pick any repo / GitHub URL in the page
 
 uv run python -m eval.run                       # precision + recall vs. baselines
 ```

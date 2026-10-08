@@ -59,6 +59,20 @@ Open http://127.0.0.1:8765, then:
 5. Press **Run AI review** (~20 s the first time): only the 3 reachable
    findings go to the local model; each gets a verdict and reasoning.
 
+### Scan any repo from the page
+
+Start Ravel without a repo and choose one in the browser:
+
+```bash
+uv run ravel serve --llm-provider ollama --model llama3.2:3b
+```
+
+The start screen has a URL bar: paste `github.com/owner/repo` (or a local
+folder) and press **Scan**, or click one of the examples. **options** takes a
+commit/branch and the repo's virtualenv (without one, third-party calls stay
+unresolved and coverage is lower; the page says so). The bar stays at the top
+of the page to switch repos at any time.
+
 ## 4. The numbers (the claim)
 
 ```bash
