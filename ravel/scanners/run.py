@@ -75,7 +75,9 @@ def scan_repo(
     graph = graph or build_graph(root, venv=venv)
     files = sorted({n.file_path for n in graph.nodes if n.kind is NodeKind.FILE})
 
-    results = [s.scan(root, files) for s in (scanners or default_scanners())]
+    if scanners is None:
+        scanners = default_scanners()
+    results = [s.scan(root, files) for s in scanners]  # [] means: graph only, no scanners
     raw = [f for r in results for f in r.findings]
     findings, mapping = normalize(
         raw,

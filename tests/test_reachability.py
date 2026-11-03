@@ -312,3 +312,9 @@ def test_scan_repo_runs_reachability_on_flaskr() -> None:
     for tf in test_findings:
         assert tf.finding.static_evidence is not None
         assert tf.finding.static_evidence.reachable is Reachability.UNREACHABLE
+
+
+def test_scan_repo_with_no_scanners_builds_the_graph_only() -> None:
+    report = scan_repo(FLASKR, scanners=[])
+    assert report.results == [] and report.findings == []
+    assert report.graph.nodes
