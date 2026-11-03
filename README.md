@@ -4,7 +4,8 @@
 
 Ravel builds a knowledge graph of a Python codebase, then uses it to answer a question scanners can't: *which findings actually matter?* It does this by tracing whether flagged code is reachable from an untrusted entry point — turning a wall of ~200 scanner alerts into a short, ranked list of the ones that are real.
 
-> **Status (2026-10-07):** Phases 0–4 built and the web view works. The Phase 3
+> **Status (2026-11-03):** Phases 0–4 built; the web view and the dependency
+> report (`ravel deps`) work. The Phase 3
 > checkpoint passes (precision ×8.57, recall retained 100% on two labelled repos);
 > LLM triage ships disabled because it does not yet beat reachability alone.
 > Details: [`docs/BUILD-PLAN.md`](./docs/BUILD-PLAN.md).
@@ -17,6 +18,7 @@ Ravel builds a knowledge graph of a Python codebase, then uses it to answer a qu
 uv sync                                         # Python 3.12, via uv
 uv run ravel scan eval/fixtures/vuln_shop       # scanners → reachability → ranked list
 uv run ravel scan https://github.com/owner/repo --ref <commit>   # any git URL
+uv run ravel deps eval/fixtures/legacy_shop     # upgrades + deprecated APIs, by reachability
 
 npm --prefix web install && npm --prefix web run build
 uv run ravel serve eval/fixtures/vuln_shop      # web view on http://127.0.0.1:8765

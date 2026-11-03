@@ -14,6 +14,7 @@ npm --prefix web run build            # builds web/out, which ravel serve hosts
 brew install ollama gitleaks          # if not installed yet
 ollama pull llama3.2:3b               # ~2 GB, local model for the AI review
 uv run python -m eval.run             # first run clones vulpy and builds venvs (cached)
+brew install osv-scanner && uv run ravel osv-db update   # offline advisory DB (~34 MB), for step 3b
 ```
 
 A virtualenv with Flask, so the demo app's calls resolve (coverage 100%):
@@ -73,6 +74,21 @@ commit/branch and the repo's virtualenv (without one, third-party calls stay
 unresolved and coverage is lower; the page says so). The bar stays at the top
 of the page to switch repos at any time.
 
+### 3b. What would upgrading cost? (dependency report)
+
+```bash
+uv run ravel deps eval/fixtures/legacy_shop --venv ~/.venvs/ravel-demo
+```
+
+Point at: Flask and Werkzeug are **upgrade now** (pinned 2.2.2 with advisories;
+route code calls Flask, Werkzeug runs under it) and their pins are *stale* (the
+venv already has fixed releases). Two deprecated stdlib calls: `utcnow()` is
+**reachable** (`POST /orders → placed_at`), `locale.getdefaultlocale()` is in an
+offline script, **unreachable**. Ravel has no list of deprecated APIs: it reads
+the library's own `@deprecated` / `DeprecationWarning`. The same report is the
+**Dependencies** tab in the web view (`ravel serve eval/fixtures/legacy_shop
+--venv ~/.venvs/ravel-demo`), with "show in graph" on each call.
+
 ## 4. The numbers (the claim)
 
 ```bash
@@ -91,4 +107,5 @@ not the LLM, is the core.
 - *Web page says "web view has not been built"*: run `npm --prefix web run build`.
 - *Run AI review shows "Failed to connect to Ollama"*: start `ollama serve`.
 - *Coverage below 80%*: you forgot `--venv`.
+- *Dependencies tab says "OSV not configured"*: run `uv run ravel osv-db update` (step 0).
 - No network at all: everything above works offline once step 0 is done.
