@@ -1,0 +1,4 @@
+# Pinned deliberately: these versions have published advisories, so the
+# dependency report has real upgrades to classify. Do not upgrade.
+Flask==2.2.2
+Werkzeug==2.2.2

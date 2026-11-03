@@ -42,7 +42,7 @@ packages = ["ravel"]
 line-length = 100
 src = ["ravel", "tests"]
 # Vendored third-party code kept byte-identical to upstream, and planted-bug fixtures.
-extend-exclude = ["eval/benchmarks", "eval/fixtures/flaskr", "eval/fixtures/vuln_shop", "eval/fixtures/pygoat_views"]
+extend-exclude = ["eval/benchmarks", "eval/fixtures/flaskr", "eval/fixtures/vuln_shop", "eval/fixtures/legacy_shop", "eval/fixtures/pygoat_views"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
