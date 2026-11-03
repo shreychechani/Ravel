@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { fetchReport, openRepo, reachOf, rescan, type Report } from "@/lib/report";
 import { CodeGraph } from "./CodeGraph";
+import { Dependencies } from "./Dependencies";
 import { FindingDetail } from "./FindingDetail";
 import { FindingList, type ReachFilter } from "./FindingList";
 import { RepoBar } from "./RepoBar";
@@ -20,7 +21,7 @@ export function RavelApp() {
   const [filter, setFilter] = useState<ReachFilter>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"findings" | "graph">("findings");
+  const [tab, setTab] = useState<"findings" | "deps" | "graph">("findings");
   const [graphFocus, setGraphFocus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -139,6 +140,12 @@ export function RavelApp() {
             {(
               [
                 ["findings", `Findings · ${report.findings.length}`],
+                [
+                  "deps",
+                  report.dependencies
+                    ? `Dependencies · ${report.dependencies.packages.filter((p) => p.urgency !== "ok").length}`
+                    : "Dependencies",
+                ],
                 ["graph", "Code graph"],
               ] as const
             ).map(([key, label]) => (
@@ -153,6 +160,16 @@ export function RavelApp() {
               </button>
             ))}
           </nav>
+
+          {tab === "deps" && (
+            <Dependencies
+              report={report}
+              onShowInGraph={(nodeId) => {
+                setGraphFocus(nodeId);
+                setTab("graph");
+              }}
+            />
+          )}
 
           {tab === "graph" && (
             <CodeGraph

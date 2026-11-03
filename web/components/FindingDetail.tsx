@@ -11,6 +11,8 @@ function explain(report: Report, f: Finding): string {
     return `Untrusted input can reach this code: a fully resolved call path starts at the web route ${start ?? "?"}${
       ev && ev.blast_radius > 1 ? `, and ${ev.blast_radius} different entry points reach it` : ""
     }.`;
+  if (f.package && r === "unknown" && ev?.path.length)
+    return `Code reachable from the web route ${start ?? "?"} imports this package and makes calls Ravel could not resolve. They may go into it, so it is unknown rather than safe.`;
   if (r === "unknown")
     return ev?.path.length
       ? "A path exists only through a call Ravel could not resolve, so it is marked unknown rather than safe."

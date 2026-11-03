@@ -68,6 +68,74 @@ export interface GraphEdge {
   resolved: boolean;
 }
 
+export type Urgency = "urgent" | "check" | "routine" | "migrate" | "ok";
+
+export interface Evidence {
+  reachable: Reach;
+  path: string[];
+  blast_radius: number;
+}
+
+export interface DeprecatedApi {
+  symbol: string;
+  kind: "decorator" | "warning" | "module";
+  category: string | null;
+  message: string | null;
+  conditional: boolean; // only some calls / arguments trigger it
+  reach: Evidence;
+  calls: ({ node_id: string; line: number } & Evidence)[];
+}
+
+export interface PackageEntry {
+  name: string;
+  modules: string[];
+  version: string | null; // installed in the scanned environment
+  declared: string | null; // pinned in a manifest, as OSV read it
+  stdlib: boolean;
+  urgency: Urgency;
+  references: number;
+  files: number;
+  users: string[];
+  usage: Evidence;
+  via: string[];
+  advisories: {
+    finding_id: string;
+    id: string;
+    aliases: string[];
+    severity: string;
+    summary: string;
+    fixed_in: string | null;
+    reachable: Reach;
+  }[];
+  upgrade_to: string | null;
+  unfixed: number;
+  pin_is_stale: boolean;
+  deprecated: DeprecatedApi[];
+}
+
+export interface Dependencies {
+  summary: {
+    packages: number;
+    urgent: number;
+    check: number;
+    routine: number;
+    migrate: number;
+    ok: number;
+    deprecated_apis: number;
+    deprecated_calls: number;
+    deprecated_calls_by_reach: Record<Reach, number>;
+  };
+  osv: { status: string; detail: string | null };
+  deprecation_check: {
+    external_calls_checked: number;
+    without_source: number;
+    unresolved_calls: number;
+    stdlib_python: string;
+  };
+  upgrade_note: string;
+  packages: PackageEntry[];
+}
+
 export interface Report {
   report_version: number;
   repo: string;
@@ -87,6 +155,7 @@ export interface Report {
   cross_scanner_duplicates: number;
   findings: Finding[];
   graph_view?: { nodes: GraphNode[]; edges: GraphEdge[] };
+  dependencies?: Dependencies; // report_version >= 3
   triage_stats?: {
     survivors_evaluated: number;
     llm_calls: number;
@@ -122,6 +191,22 @@ export const VERDICT_STYLE: Record<Verdict, string> = {
   false_positive: "bg-safe-soft text-safe border-safe",
   needs_review: "bg-unknown-soft text-unknown border-unknown",
   unreachable: "bg-unreach-soft text-unreach border-unreach",
+};
+
+export const URGENCY_STYLE: Record<Urgency, string> = {
+  urgent: "bg-real-soft text-real border-real",
+  check: "bg-unknown-soft text-unknown border-unknown",
+  routine: "bg-unreach-soft text-unreach border-unreach",
+  migrate: "bg-graph-soft text-graph border-graph",
+  ok: "bg-safe-soft text-safe border-safe",
+};
+
+export const URGENCY_LABEL: Record<Urgency, string> = {
+  urgent: "Upgrade now",
+  check: "Check",
+  routine: "Routine upgrade",
+  migrate: "Migration work",
+  ok: "Nothing to do",
 };
 
 export const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
