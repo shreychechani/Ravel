@@ -7,6 +7,7 @@ from pathlib import Path
 from ravel.deps.distributions import (
     import_names,
     installed_versions,
+    module_distributions,
     required_by,
     requirements_graph,
 )
@@ -56,3 +57,11 @@ def test_installed_versions_map_import_names_to_releases(tmp_path: Path) -> None
     (yaml / "top_level.txt").write_text("yaml\n", encoding="utf-8")
     (tmp_path / "Flask-3.1.3.dist-info").mkdir()  # no metadata: normalized name
     assert installed_versions([tmp_path]) == {"yaml": "6.0.1", "flask": "3.1.3"}
+
+
+def test_module_distributions_map_import_names_back_to_distributions(tmp_path: Path) -> None:
+    pillow = tmp_path / "pillow-10.3.0.dist-info"
+    pillow.mkdir()
+    (pillow / "top_level.txt").write_text("PIL\n", encoding="utf-8")
+    (tmp_path / "Flask-3.1.3.dist-info").mkdir()
+    assert module_distributions([tmp_path]) == {"PIL": "pillow", "flask": "Flask"}

@@ -84,6 +84,24 @@ def installed_versions(site_packages: Iterable[Path]) -> dict[str, str]:
     return versions
 
 
+def module_distributions(site_packages: Iterable[Path]) -> dict[str, str]:
+    """Top-level import name → the installed distribution that provides it.
+
+    The reverse of :func:`import_names` (``PIL`` → ``pillow``), so a call into
+    ``PIL`` and an OSV advisory against ``Pillow`` land on one package. The
+    first site-packages wins, as on ``sys.path``.
+    """
+    owners: dict[str, str] = {}
+    for site in site_packages:
+        for dist_info in sorted(site.glob("*.dist-info")):
+            if "-" not in dist_info.name[: -len(".dist-info")]:
+                continue
+            name = _dist_name(dist_info)
+            for module in _from_metadata(dist_info) or {canonical(name).replace("-", "_")}:
+                owners.setdefault(module, name)
+    return owners
+
+
 _REQUIRES = re.compile(r"^Requires-Dist:\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
