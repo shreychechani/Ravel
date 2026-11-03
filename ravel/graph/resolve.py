@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,12 @@ import jedi
 import networkx as nx
 
 from ravel.core.logging import get_logger
+from ravel.deps.deprecations import (
+    DeprecatedUse,
+    DeprecationCheck,
+    DeprecationMarker,
+    DeprecationReader,
+)
 from ravel.deps.distributions import installed_versions
 from ravel.graph.entrypoints import (
     DJANGO_VIEW_METHODS,
@@ -108,6 +114,9 @@ class GraphResult:
     entry_points: list[EntryPoint] = field(default_factory=list)
     coverage: Coverage = field(default_factory=Coverage)
     environment: PythonEnv = field(default_factory=lambda: PythonEnv(venv=None))
+    # External calls / bases whose definition its library marks deprecated.
+    deprecated_uses: list[DeprecatedUse] = field(default_factory=list)
+    deprecation_check: DeprecationCheck = field(default_factory=DeprecationCheck)
 
 
 def _pt(point: Any) -> tuple[int, int]:
@@ -356,6 +365,32 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
     edges.extend(imports.edges)
     external_refs: list[ExternalRef] = list(imports.external_refs)
     cov = Coverage()
+    reader = DeprecationReader()
+    check = DeprecationCheck()
+    deprecated: list[DeprecatedUse] = []
+
+    def note_deprecation(node: Node, line: int, definition: Any) -> None:
+        found = _deprecation(reader, definition)
+        if found is None:  # a builtin: nothing to check
+            return
+        check.checked += 1
+        marker, located = found
+        if marker is None:
+            if not located:
+                check.no_source += 1
+            return
+        check.deprecated += 1
+        module = definition.module_name or ""
+        deprecated.append(
+            DeprecatedUse(
+                node_id=node.id,
+                line=line,
+                package=module.split(".")[0],
+                symbol=definition.full_name or f"{module}.{definition.name}",
+                version=None,
+                marker=marker,
+            )
+        )
 
     for source in files:
         script = partial(jedi.Script, code=source.content, path=str(source.path), project=project)
@@ -398,6 +433,7 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
 
             # Third-party or stdlib — record the external reference.
             cov.external += 1
+            note_deprecation(src_node, site.line, definition)
             package = (definition.module_name or "").split(".")[0]
             if package and not definition.in_builtin_module() and package != "builtins":
                 external_refs.append(
@@ -433,6 +469,7 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
                 if dst is not None and dst.kind is NodeKind.CLASS:
                     edges.append(Edge(src_id=cls.id, dst_id=dst.id, kind=EdgeKind.INHERITS))
                 continue
+            note_deprecation(cls, base.line, definition)
             package = (definition.module_name or "").split(".")[0]
             if package and not definition.in_builtin_module() and package != "builtins":
                 external_refs.append(ExternalRef(node_id=cls.id, package=package, symbol=base.name))
@@ -464,6 +501,13 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
     external_refs = [
         r.model_copy(update={"version": versions.get(r.package)}) for r in external_refs
     ]
+    deprecated = [replace(d, version=versions.get(d.package)) for d in deprecated]
+    log.info(
+        "deprecations: %d of %d external call sites hit a deprecated API (%d without source)",
+        check.deprecated,
+        check.checked,
+        check.no_source,
+    )
     return GraphResult(
         graph=graph,
         nodes=nodes,
@@ -472,7 +516,33 @@ def build_graph(root: Path | str, venv: Path | None = None) -> GraphResult:
         entry_points=entry_points,
         coverage=cov,
         environment=env,
+        deprecated_uses=deprecated,
+        deprecation_check=check,
     )
+
+
+def _deprecation(
+    reader: DeprecationReader, definition: Any
+) -> tuple[DeprecationMarker | None, bool] | None:
+    """``(marker, located)`` for an external definition: the library's own
+    deprecation marker, if any, and whether its source (or stub) was found.
+
+    A compiled (C) module has no source to read; its typeshed stub carries the
+    markers (``@deprecated`` on ``datetime.utcnow``). Builtins are skipped.
+    """
+    if (definition.module_name or "") == "builtins":
+        return None
+    path, line = definition.module_path, definition.line
+    if path is None:
+        try:
+            stubs = definition.goto(only_stubs=True)
+        except Exception as exc:  # Jedi can raise on odd compiled objects
+            log.debug("jedi stub lookup failed for %s: %s", definition.full_name, exc)
+            stubs = []
+        if not stubs or stubs[0].module_path is None:
+            return None, False
+        path, line = stubs[0].module_path, stubs[0].line
+    return reader.marker(path, line), True
 
 
 def _django_entrypoints(
