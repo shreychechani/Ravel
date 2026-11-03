@@ -62,3 +62,19 @@ def test_scan_with_triage_flag(tmp_path: Path) -> None:
     assert ts["total"] > 0
     assert "llm_calls" in ts
     assert "cached_hits" in ts
+
+
+def test_deps_reports_deprecated_calls_and_osv_status(tmp_path: Path) -> None:
+    legacy = DJANGO.parent / "legacy_shop"
+    out = tmp_path / "deps.json"
+    # An empty --osv-db: OSV must be reported as not configured, never silently skipped.
+    args = ["deps", str(legacy), "--osv-db", str(tmp_path / "no-db"), "--json", str(out)]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "Deprecated APIs in use" in result.output
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    apis = {a["symbol"] for p in payload["packages"] for a in p["deprecated"]}
+    assert apis == {"datetime.datetime.utcnow", "locale.getdefaultlocale"}
+    assert "unresolved_calls" in payload["deprecation_check"]  # the check's blind spot
+    assert payload["osv"]["status"] in {"not_installed", "not_configured"}
+    assert payload["summary"]["deprecated_calls_by_reach"]["reachable"] == 1

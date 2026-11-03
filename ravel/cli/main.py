@@ -3,6 +3,7 @@
 ``ravel index PATH`` builds the call graph and reports coverage.
 ``ravel scan PATH`` runs the security scanners, filters findings by reachability,
 optionally performs LLM adjudication, and anchors every finding on a graph node.
+``ravel deps PATH`` reports dependency upgrades and deprecated APIs, by reachability.
 ``ravel serve PATH`` opens the web view of a scan on localhost.
 ``ravel summarize PATH`` writes bottom-up function and module summaries with an LLM.
 ``ravel osv-db update`` downloads the offline vulnerability database.
@@ -20,6 +21,7 @@ from rich.table import Table
 
 from ravel.api.server import ReportStore, ScanSettings, Workspace, create_app, load_report
 from ravel.core.logging import configure_logging, get_logger
+from ravel.deps.report import DepsReport, Urgency, build_deps_report, deps_payload
 from ravel.graph.parse import PROVENANCE
 from ravel.graph.resolve import build_graph
 from ravel.ingest.remote import is_remote, resolve_target
@@ -27,7 +29,7 @@ from ravel.models import EdgeKind, NodeKind, Reachability
 from ravel.report import build_report
 from ravel.scanners.base import ScanStatus
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
-from ravel.scanners.osv import default_db_dir, update_db
+from ravel.scanners.osv import OsvScanner, default_db_dir, update_db
 from ravel.scanners.run import default_scanners, scan_repo
 from ravel.summarize.summaries import SummaryCache, summaries_payload, summarize_graph
 from ravel.triage.cache import TriageCache
@@ -391,6 +393,160 @@ def scan(
         payload = build_report(report, path, budget)
         json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         log.info("Wrote %d findings to %s", len(report.findings), json_out)
+
+
+_URGENCY_STYLE = {
+    Urgency.URGENT: "bold red",
+    Urgency.CHECK: "yellow",
+    Urgency.ROUTINE: "dim",
+    Urgency.MIGRATE: "cyan",
+    Urgency.OK: "green",
+}
+_REACH_STYLE = {
+    Reachability.REACHABLE: "green",
+    Reachability.UNKNOWN: "yellow",
+    Reachability.UNREACHABLE: "dim",
+}
+
+
+@app.command()
+def deps(
+    target: _TargetArg,
+    venv: _VenvOpt = None,
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write the dependency report to this JSON file.")
+    ] = None,
+    osv_db: Annotated[
+        Path | None,
+        typer.Option("--osv-db", help="Offline OSV database dir (default: $RAVEL_OSV_DB)."),
+    ] = None,
+    osv_bin: Annotated[
+        Path | None, typer.Option("--osv-bin", help="Path to the osv-scanner executable.")
+    ] = None,
+    ref: _RefOpt = None,
+) -> None:
+    """What would upgrading cost? Advisories and deprecated APIs, ranked by reachability."""
+    configure_logging()
+    path = _resolve_target(target, ref)
+    try:
+        scan_report = scan_repo(path, venv=venv, scanners=[OsvScanner(osv_db, osv_bin)])
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--venv") from exc
+    report = build_deps_report(scan_report)
+    _print_deps(report, path, scan_report.graph.environment.describe())
+    if json_out is not None:
+        json_out.write_text(json.dumps(deps_payload(report), indent=2), encoding="utf-8")
+        log.info("Wrote the dependency report (%d packages) to %s", len(report.packages), json_out)
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _print_deps(report: DepsReport, path: Path, env: str) -> None:
+    osv = report.osv
+    osv_text = "not run"
+    if osv is not None:
+        style = "green" if osv.status is ScanStatus.OK else "yellow"
+        osv_text = f"[{style}]{osv.status.value}[/{style}]" + (
+            f" ({osv.detail})" if osv.detail else ""
+        )
+    c = report.check
+    summary = Table(title=f"Ravel deps - {path}")
+    summary.add_column("metric", style="cyan")
+    summary.add_column("value")
+    summary.add_row("Third-party packages used", str(len(report.third_party)))
+    summary.add_row(
+        "Upgrades by urgency",
+        " | ".join(
+            f"[{_URGENCY_STYLE[u]}]{report.count(u)} {u.value}[/{_URGENCY_STYLE[u]}]"
+            for u in (Urgency.URGENT, Urgency.CHECK, Urgency.ROUTINE, Urgency.MIGRATE)
+        ),
+    )
+    summary.add_row("Known advisories (OSV)", osv_text)
+    summary.add_row(
+        "Deprecation check",
+        f"{c.checked} resolved external calls read · {c.deprecated} deprecated · "
+        f"{c.no_source} without source",
+    )
+    summary.add_row(
+        "  not seen by the check",
+        f"[yellow]{report.unresolved_calls} unresolved call sites[/yellow]"
+        if report.unresolved_calls
+        else "0 unresolved call sites",
+    )
+    summary.add_row("Stdlib judged against", f"Python {report.python} (the one running Ravel)")
+    summary.add_row("Python env", env)
+    console.print(summary)
+
+    listed = [p for p in report.packages if p.urgency is not Urgency.OK]
+    if listed:
+        table = Table(title="Packages to act on (most urgent first)")
+        table.add_column("package", style="cyan")
+        table.add_column("version")
+        table.add_column("urgency")
+        table.add_column("advisories", justify="right")
+        table.add_column("upgrade to")
+        table.add_column("deprecated calls", justify="right")
+        table.add_column("usage")
+        for p in listed:
+            version = p.version or p.declared or ("stdlib" if p.stdlib else "?")
+            if p.declared and p.version and p.declared != p.version:
+                version += f" (pinned {p.declared})"
+            worst = f" ({p.worst_severity.value})" if p.worst_severity else ""
+            upgrade = p.upgrade_to or ("-" if not p.advisories else "no fix listed")
+            if p.upgrade_to and p.unfixed:
+                upgrade += f" (+{p.unfixed} unfixed)"
+            if p.via:
+                usage = f"runs under {', '.join(p.via)} ({_plural(p.files, 'file')})"
+            elif not p.users:
+                usage = "[dim]not imported by repo code[/dim]"
+            else:
+                usage = f"{_plural(p.references, 'ref')} in {_plural(p.files, 'file')}"
+            if p.pin_is_stale:
+                upgrade += " [green](installed already fixed: update the pin)[/green]"
+            style = _URGENCY_STYLE[p.urgency]
+            table.add_row(
+                p.name,
+                version,
+                f"[{style}]{p.urgency.value}[/{style}]",
+                f"{len(p.advisories)}{worst}" if p.advisories else "-",
+                upgrade,
+                str(p.deprecated_calls) if p.deprecated else "-",
+                usage,
+            )
+        console.print(table)
+    else:
+        console.print(
+            "[green]No package needs action: no known advisories, no deprecated calls.[/green]"
+        )
+
+    apis = [(p, a) for p in report.packages for a in p.deprecated]
+    if apis:
+        table = Table(title="Deprecated APIs in use (as their libraries mark them)")
+        table.add_column("API", style="cyan", overflow="fold")
+        table.add_column("reachability")
+        table.add_column("calls", justify="right")
+        table.add_column("where")
+        table.add_column("library says")
+        for _p, a in apis:
+            reach = a.reach.reachable
+            style = _REACH_STYLE[reach]
+            first = a.calls[0].use
+            where = f"{first.node_id.split('::', 1)[0]}:{first.line}"
+            if len(a.calls) > 1:
+                where += f" (+{len(a.calls) - 1})"
+            note = a.marker.message or a.marker.category or "deprecated"
+            if a.marker.conditional:
+                note = f"[yellow](only some calls)[/yellow] {note}"
+            table.add_row(
+                a.symbol, f"[{style}]{reach.value}[/{style}]", str(len(a.calls)), where, note
+            )
+        console.print(table)
+    console.print(
+        "[dim]'upgrade to' = the smallest release fixing every known advisory (offline OSV DB), "
+        "not the latest release: Ravel never sends your dependency list off this machine.[/dim]"
+    )
 
 
 @app.command()
