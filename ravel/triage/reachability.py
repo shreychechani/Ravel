@@ -13,11 +13,14 @@ Crucial non-negotiables (PRODUCT.md §6):
 
 from __future__ import annotations
 
+from collections import defaultdict
+from typing import Protocol
+
 import networkx as nx
 
 from ravel.core.logging import get_logger
 from ravel.graph.resolve import GraphResult
-from ravel.models import Finding, Reachability, StaticEvidence, Trust
+from ravel.models import EdgeKind, Finding, NodeKind, Reachability, StaticEvidence, Trust
 from ravel.scanners.normalize import LocatedFinding
 
 log = get_logger("ravel.triage.reachability")
@@ -153,6 +156,74 @@ def evaluate_node_reachability(
     )
 
 
+class Tracer(Protocol):
+    def __call__(self, ids: list[str], *, imported: bool = False) -> StaticEvidence: ...
+
+
+def reachability_tracer(graph_result: GraphResult) -> Tracer:
+    """Trace any set of nodes back to the untrusted entry points.
+
+    The same rules :func:`analyze_reachability` applies to findings, for
+    callers that trace other things (the deps report traces the code that
+    calls a deprecated API). The traversal graphs are built once.
+    ``imported=True`` marks targets that *import* a package rather than call
+    it — see :func:`_import_in_use`.
+    """
+    untrusted_eps = {ep.node_id for ep in graph_result.entry_points if ep.trust is Trust.UNTRUSTED}
+    resolved_g, full_g = _build_subgraphs(graph_result.graph)
+    file_ids = {n.file_path: n.id for n in graph_result.nodes if n.kind is NodeKind.FILE}
+    # Per file, the defs in it that make at least one call we could not resolve.
+    blind: dict[str, list[str]] = defaultdict(list)
+    unresolved_callers = {
+        e.src_id for e in graph_result.edges if e.kind is EdgeKind.CALLS and not e.resolved
+    }
+    for n in graph_result.nodes:
+        if n.kind is not NodeKind.FILE and n.id in unresolved_callers and n.file_path in file_ids:
+            blind[file_ids[n.file_path]].append(n.id)
+
+    def trace(ids: list[str], *, imported: bool = False) -> StaticEvidence:
+        # No entry points detected at all means detection found no way in, not
+        # that there is none: "unreachable" would be a guess, so it is unknown.
+        if not graph_result.entry_points:
+            return StaticEvidence(reachable=Reachability.UNKNOWN, path=[], blast_radius=0)
+        evidence = evaluate_node_reachability(ids, untrusted_eps, resolved_g, full_g)
+        if not imported or evidence.reachable is not Reachability.UNREACHABLE:
+            return evidence
+        return _import_in_use(ids, blind, untrusted_eps, resolved_g, full_g) or evidence
+
+    return trace
+
+
+def _import_in_use(
+    target_ids: list[str],
+    blind: dict[str, list[str]],
+    untrusted_eps: set[str],
+    resolved_graph: nx.DiGraph,
+    full_graph: nx.DiGraph,
+) -> StaticEvidence | None:
+    """A package imported by a module whose request-reachable code we can't fully see.
+
+    A dependency finding is anchored on the files importing the package and
+    on the functions with a *resolved* call into it. Nothing calls a file, so
+    a file anchor is never on a traced path. That is right when every call in
+    the file is resolved — we then know which functions use the package. But
+    a call we could not resolve (every call into a package missing from the
+    environment) may be a call into it; if a function making one is reached
+    from untrusted input, "unreachable" would demote the advisory on missing
+    evidence — the §6 failure mode. So it is ``unknown``, with the path to
+    that function. Only a resolved call earns ``reachable``.
+    """
+    candidates = [m for t in target_ids for m in blind.get(t, [])]
+    if not candidates:
+        return None
+    inner = evaluate_node_reachability(candidates, untrusted_eps, resolved_graph, full_graph)
+    if inner.reachable is Reachability.UNREACHABLE:
+        return None
+    return StaticEvidence(
+        reachable=Reachability.UNKNOWN, path=inner.path, blast_radius=inner.blast_radius
+    )
+
+
 def analyze_reachability[F: (Finding, LocatedFinding)](
     graph_result: GraphResult,
     findings: list[F],
@@ -162,14 +233,8 @@ def analyze_reachability[F: (Finding, LocatedFinding)](
     Mutates and returns the input findings with ``static_evidence`` attached.
     Supports both ``LocatedFinding`` and raw ``Finding`` models.
     """
-    untrusted_eps = {ep.node_id for ep in graph_result.entry_points if ep.trust is Trust.UNTRUSTED}
-
-    resolved_g, full_g = _build_subgraphs(graph_result.graph)
-
-    # No entry points detected at all means detection found no way in, not that
-    # there is none: "unreachable" would then be a guess, so everything is unknown.
-    no_entry_points = not graph_result.entry_points
-    if no_entry_points:
+    trace = reachability_tracer(graph_result)
+    if not graph_result.entry_points:
         log.warning("reachability: no entry points detected; all findings marked unknown")
 
     for item in findings:
@@ -185,11 +250,9 @@ def analyze_reachability[F: (Finding, LocatedFinding)](
         elif finding.node_id:
             target_ids.append(finding.node_id)
 
-        if no_entry_points:
-            evidence = StaticEvidence(reachable=Reachability.UNKNOWN, path=[], blast_radius=0)
-        else:
-            evidence = evaluate_node_reachability(target_ids, untrusted_eps, resolved_g, full_g)
-        finding.static_evidence = evidence
+        # A dependency finding's anchors are its importers (and callers).
+        imported = isinstance(item, LocatedFinding) and item.node is None and bool(item.anchors)
+        finding.static_evidence = trace(target_ids, imported=imported)
 
     reachable_count = 0
     unknown_count = 0

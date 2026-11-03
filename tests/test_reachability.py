@@ -16,11 +16,13 @@ from ravel.models import (
     Reachability,
     Trust,
 )
+from ravel.scanners.base import RawFinding, ScanResult, ScanStatus, Severity
 from ravel.scanners.run import scan_repo
 from ravel.triage.ranking import rank_findings
 from ravel.triage.reachability import analyze_reachability, evaluate_node_reachability
 
 FLASKR = Path("eval/fixtures/flaskr")
+DJANGO = Path("eval/fixtures/django_app")
 
 
 def _make_node(nid: str, kind: NodeKind = NodeKind.FUNCTION) -> Node:
@@ -318,3 +320,38 @@ def test_scan_repo_with_no_scanners_builds_the_graph_only() -> None:
     report = scan_repo(FLASKR, scanners=[])
     assert report.results == [] and report.findings == []
     assert report.graph.nodes
+
+
+class _OneAdvisory:
+    """An OSV stand-in returning one advisory in the real wrapper's shape."""
+
+    source = FindingSource.OSV
+
+    def scan(self, root: Path, files: list[str]) -> ScanResult:
+        advisory = RawFinding(
+            source=FindingSource.OSV,
+            rule_id="CVE-2021-35042",
+            rel_path="requirements.txt",
+            line=0,
+            end_line=0,
+            raw_severity="9.8",
+            severity=Severity.CRITICAL,
+            confidence=None,
+            cwe="CWE-89",
+            message="known vulnerability in Django",
+            package="Django",
+            package_version="3.2",
+            fixed_in="3.2.5",
+        )
+        return ScanResult(self.source, ScanStatus.OK, "test", [advisory])
+
+
+def test_imported_package_used_through_unresolved_calls_is_unknown() -> None:
+    # No environment: every call into Django in the polls views is unresolved,
+    # so whether a route touches the vulnerable code can't be known (§6) —
+    # "unreachable" would demote the advisory on missing evidence.
+    (advisory,) = scan_repo(DJANGO, scanners=[_OneAdvisory()]).findings
+    evidence = advisory.finding.static_evidence
+    assert evidence is not None
+    assert evidence.reachable is Reachability.UNKNOWN
+    assert evidence.path  # the route reaching the code we can't see into
