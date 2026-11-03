@@ -17,13 +17,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ravel.deps.report import build_deps_report, deps_payload
 from ravel.graph.resolve import GraphResult
 from ravel.models import EdgeKind, Node, NodeKind
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.run import ScanReport
 from ravel.triage.provider import TokenBudget
 
-REPORT_VERSION = 2  # 2: adds "graph_view", the whole code graph
+REPORT_VERSION = 3  # 2: adds "graph_view", the whole code graph · 3: adds "dependencies"
 _SNIPPET_MAX_LINES = 60
 _FILE_WINDOW = 5  # lines either side of a module-level finding
 
@@ -254,6 +255,7 @@ def build_report(
         "cross_scanner_duplicates": cross_scanner_duplicates(report.groups),
         "graph_view": _graph_view(graph, report.findings),
         "findings": findings,
+        "dependencies": deps_payload(build_deps_report(report)),
     }
     if report.triage_stats is not None:
         ts = report.triage_stats

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from ravel.deps.report import Urgency, build_deps_report, deps_payload
 from ravel.models import FindingSource, Reachability
+from ravel.report import REPORT_VERSION, build_report
 from ravel.scanners.base import RawFinding, ScanResult, ScanStatus, Severity
 from ravel.scanners.run import scan_repo
 
@@ -149,3 +151,19 @@ def test_deprecation_check_reports_what_it_could_not_see() -> None:
     check = payload["deprecation_check"]
     assert check["unresolved_calls"] > 0  # no env: calls into Django are invisible
     assert check["stdlib_python"] == "3.12"
+
+
+@pytest.fixture(scope="module")
+def scan_json() -> dict[str, object]:
+    return build_report(scan_repo(LEGACY, scanners=[]), LEGACY)
+
+
+def test_scan_report_carries_the_dependency_report(scan_json: dict[str, object]) -> None:
+    assert scan_json["report_version"] == REPORT_VERSION == 3
+    deps = scan_json["dependencies"]
+    assert isinstance(deps, dict)
+    assert deps["summary"]["deprecated_calls_by_reach"] == {
+        "reachable": 1,
+        "unreachable": 1,
+        "unknown": 0,
+    }
