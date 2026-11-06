@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from ravel.core.logging import get_logger
 from ravel.graph.resolve import GraphResult
 from ravel.incremental.ast_diff import NodeDiffResult
+from ravel.models import NodeKind, Reachability
 from ravel.scanners.normalize import LocatedFinding
 from ravel.triage.reachability import reachability_tracer
 
@@ -71,11 +72,18 @@ def update_reachability_incrementally(
         if edge.src_id in dirty_node_ids:
             new_edges_by_dst.setdefault(edge.dst_id, []).append(edge.src_id)
 
+    dirty_files = {
+        n.file_path for n in [*diff.modified_nodes, *diff.added_nodes] if n.kind is NodeKind.FILE
+    }
     reused: list[LocatedFinding] = []
     to_recalculate: list[LocatedFinding] = []
 
     # 1. Process previous findings
     for lf in previous_findings:
+        # If the file was rescanned, new_findings replaces the old findings for this file
+        if new_findings is not None and lf.raw.rel_path in dirty_files:
+            continue
+
         f = lf.finding
         curr_node_id = f.node_id or (lf.node.id if lf.node else None)
 
@@ -105,11 +113,20 @@ def update_reachability_incrementally(
                     break
 
         ev = f.static_evidence
-        if ev is None or not ev.path:
+        if ev is None:
             to_recalculate.append(lf)
             continue
 
-        # Remap path node IDs
+        if ev.reachable is Reachability.UNREACHABLE:
+            # Unreachable findings have path=[].
+            # Only invalidate if the node itself is dirty or has new incoming edges
+            if mapped_node_id in dirty_node_ids or mapped_node_id in new_edges_by_dst:
+                to_recalculate.append(lf)
+            else:
+                reused.append(lf)
+            continue
+
+        # Remap path node IDs for REACHABLE and UNKNOWN findings
         remapped_path = [diff.rename_map.get(nid, nid) for nid in ev.path]
         ev.path = remapped_path
 

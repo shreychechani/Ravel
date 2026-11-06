@@ -163,7 +163,9 @@ def splice_graph(
             if rel is not None and rel in nodes_by_file:
                 target_node = _def_node(nodes_by_file[rel], definition)
                 if target_node is not None:
-                    new_edges.append(Edge(src_id=src_node.id, dst_id=target_node.id, kind=EdgeKind.CALLS))
+                    new_edges.append(
+                        Edge(src_id=src_node.id, dst_id=target_node.id, kind=EdgeKind.CALLS)
+                    )
                     continue
                 continue
 
