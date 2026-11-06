@@ -16,6 +16,7 @@ from ravel.core.hashing import content_hash
 from ravel.core.logging import get_logger
 from ravel.graph.parse import parse_file
 from ravel.incremental.diff import FileChange, FileChangeKind
+from ravel.incremental.renames import RenamedNode, detect_node_renames
 from ravel.ingest.loader import PYTHON_SUFFIXES, SourceFile
 from ravel.models import Node, NodeKind
 
@@ -59,11 +60,18 @@ class NodeDiffResult:
     modified_nodes: list[Node] = field(default_factory=list)
     added_nodes: list[Node] = field(default_factory=list)
     deleted_nodes: list[Node] = field(default_factory=list)
+    renamed_nodes: list[RenamedNode] = field(default_factory=list)
+    rename_map: dict[str, str] = field(default_factory=dict)
     dirty_node_ids: set[str] = field(default_factory=set)
 
     @property
     def total_changed(self) -> int:
-        return len(self.modified_nodes) + len(self.added_nodes) + len(self.deleted_nodes)
+        return (
+            len(self.modified_nodes)
+            + len(self.added_nodes)
+            + len(self.deleted_nodes)
+            + len(self.renamed_nodes)
+        )
 
 
 def compute_node_diff(
@@ -146,5 +154,21 @@ def compute_node_diff(
             if old_qname not in seen_old_qnames:
                 result.deleted_nodes.append(old_node)
                 result.dirty_node_ids.add(old_node.id)
+
+    # 3. Detect function/class renames across deleted and added nodes
+    (
+        remaining_deleted,
+        remaining_added,
+        rename_res,
+    ) = detect_node_renames(result.deleted_nodes, result.added_nodes)
+    result.deleted_nodes = remaining_deleted
+    result.added_nodes = remaining_added
+    result.renamed_nodes = rename_res.renamed_nodes
+    result.rename_map = rename_res.rename_map
+
+    # Renamed nodes are also added to unchanged_nodes with their new node metadata
+    for ren in result.renamed_nodes:
+        result.unchanged_nodes.append(ren.new_node)
+        # Note: the old ID was in dirty_node_ids, keep it so dependents can remap
 
     return result
