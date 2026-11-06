@@ -123,6 +123,7 @@ The **reachability filter is deterministic and LLM-free** — it's the core of t
 ravel/
   ingest/       file discovery, git URL cloning
   graph/        tree-sitter parse, Jedi resolution, imports, entry points, env discovery
+  incremental/  git diff, AST node diffing, rename detection, selective path invalidation
   scanners/     Bandit · Semgrep · OSV-Scanner · gitleaks wrappers + normalization
   triage/       reachability, ranking, context assembly, LLM providers, verdict cache
   summarize/    bottom-up summaries, content-hash cache
