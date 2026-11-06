@@ -30,7 +30,7 @@ from ravel.report import build_report
 from ravel.scanners.base import ScanStatus
 from ravel.scanners.normalize import LocatedFinding, cross_scanner_duplicates
 from ravel.scanners.osv import OsvScanner, default_db_dir, update_db
-from ravel.scanners.run import default_scanners, scan_repo
+from ravel.scanners.run import default_scanners, scan_repo, scan_repo_incremental
 from ravel.summarize.summaries import SummaryCache, summaries_payload, summarize_graph
 from ravel.triage.cache import TriageCache
 from ravel.triage.provider import TokenBudget, create_provider
@@ -218,6 +218,14 @@ def scan(
         Path | None,
         typer.Option("--triage-cache", help="Path to triage cache JSON file."),
     ] = None,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="Base git commit/ref for incremental scan (e.g. HEAD~1, main). "
+            "Only changed files are parsed and affected paths invalidated.",
+        ),
+    ] = None,
     ref: _RefOpt = None,
 ) -> None:
     """Run the security scanners, reachability filter, and optionally adjudicate findings."""
@@ -240,16 +248,41 @@ def scan(
         cache = TriageCache(cache_file=triage_cache)
 
     try:
-        report = scan_repo(
-            path,
-            venv=venv,
-            scanners=scanners,
-            triage_provider=provider,
-            token_budget=budget,
-            triage_cache=cache,
-        )
+        if since is not None:
+            report = scan_repo_incremental(
+                path,
+                base_ref=since,
+                venv=venv,
+                scanners=scanners,
+                triage_provider=provider,
+                token_budget=budget,
+                triage_cache=cache,
+            )
+        else:
+            report = scan_repo(
+                path,
+                venv=venv,
+                scanners=scanners,
+                triage_provider=provider,
+                token_budget=budget,
+                triage_cache=cache,
+            )
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--venv") from exc
+
+    if report.incremental_stats is not None and report.diff_stats is not None:
+        inc = report.incremental_stats
+        diff_s = report.diff_stats
+        inc_table = Table(title=f"Incremental Analysis Summary (since {since})")
+        inc_table.add_column("metric", style="cyan")
+        inc_table.add_column("value", justify="right")
+        inc_table.add_row("Base Revision", since or "HEAD")
+        inc_table.add_row("Dirty / Added Nodes", str(len(diff_s.dirty_node_ids)))
+        inc_table.add_row("Renamed Functions Detected", str(len(diff_s.renamed_nodes)))
+        inc_table.add_row("Untouched Nodes Reused", str(len(diff_s.unchanged_nodes)))
+        inc_table.add_row("Paths Reused", f"[green]{inc.reused_count}[/green]")
+        inc_table.add_row("Paths Re-evaluated", f"[yellow]{inc.invalidated_count}[/yellow]")
+        console.print(inc_table)
 
     status_table = Table(title=f"Ravel scan - {path}")
     status_table.add_column("scanner", style="cyan")
