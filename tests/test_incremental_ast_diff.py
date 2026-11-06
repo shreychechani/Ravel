@@ -14,11 +14,7 @@ def test_ast_diff_unchanged_and_modified_functions(tmp_path: Path) -> None:
     # 1. Setup initial file with two functions: f_stable and f_changing
     app_py = tmp_path / "app.py"
     app_py.write_text(
-        "def f_stable():\n"
-        "    return 42\n"
-        "\n"
-        "def f_changing():\n"
-        "    return 'v1'\n",
+        "def f_stable():\n    return 42\n\ndef f_changing():\n    return 'v1'\n",
         encoding="utf-8",
     )
     src_v1 = load_single_source(tmp_path, "app.py")
@@ -28,11 +24,7 @@ def test_ast_diff_unchanged_and_modified_functions(tmp_path: Path) -> None:
 
     # 2. Modify only f_changing, leaving f_stable byte-for-byte identical
     app_py.write_text(
-        "def f_stable():\n"
-        "    return 42\n"
-        "\n"
-        "def f_changing():\n"
-        "    return 'v2_modified'\n",
+        "def f_stable():\n    return 42\n\ndef f_changing():\n    return 'v2_modified'\n",
         encoding="utf-8",
     )
 

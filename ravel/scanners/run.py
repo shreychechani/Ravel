@@ -162,11 +162,7 @@ def scan_repo_incremental(
 
     # 3. Run scanners only on dirty / added files
     dirty_files = sorted(
-        {
-            n.file_path
-            for n in [*diff.modified_nodes, *diff.added_nodes]
-            if n.kind is NodeKind.FILE
-        }
+        {n.file_path for n in [*diff.modified_nodes, *diff.added_nodes] if n.kind is NodeKind.FILE}
     )
     if scanners is None:
         scanners = default_scanners()

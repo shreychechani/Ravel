@@ -15,16 +15,12 @@ def test_splice_graph_preserves_untouched_edges_and_updates_dirty(tmp_path: Path
     # 1. Initial repo setup
     f_routes = tmp_path / "routes.py"
     f_routes.write_text(
-        "from services import get_data\n"
-        "\n"
-        "def route_handler():\n"
-        "    return get_data()\n",
+        "from services import get_data\n\ndef route_handler():\n    return get_data()\n",
         encoding="utf-8",
     )
     f_services = tmp_path / "services.py"
     f_services.write_text(
-        "def get_data():\n"
-        "    return {'status': 'ok'}\n",
+        "def get_data():\n    return {'status': 'ok'}\n",
         encoding="utf-8",
     )
 
@@ -34,10 +30,7 @@ def test_splice_graph_preserves_untouched_edges_and_updates_dirty(tmp_path: Path
     # 2. Add extra.py which calls get_data()
     f_extra = tmp_path / "extra.py"
     f_extra.write_text(
-        "from services import get_data\n"
-        "\n"
-        "def extra_worker():\n"
-        "    return get_data()\n",
+        "from services import get_data\n\ndef extra_worker():\n    return get_data()\n",
         encoding="utf-8",
     )
 
@@ -62,15 +55,12 @@ def test_splice_graph_remaps_renamed_nodes(tmp_path: Path) -> None:
     (tmp_path / "__init__.py").touch()
     f_a = tmp_path / "a.py"
     f_a.write_text(
-        "from .b import target_worker\n"
-        "def caller():\n"
-        "    return target_worker()\n",
+        "from .b import target_worker\ndef caller():\n    return target_worker()\n",
         encoding="utf-8",
     )
     f_b = tmp_path / "b.py"
     f_b.write_text(
-        "def target_worker():\n"
-        "    return 100\n",
+        "def target_worker():\n    return 100\n",
         encoding="utf-8",
     )
     g1 = build_graph(tmp_path)
@@ -79,8 +69,7 @@ def test_splice_graph_remaps_renamed_nodes(tmp_path: Path) -> None:
     f_b.unlink()
     f_c = tmp_path / "c.py"
     f_c.write_text(
-        "def target_worker():\n"
-        "    return 100\n",
+        "def target_worker():\n    return 100\n",
         encoding="utf-8",
     )
 

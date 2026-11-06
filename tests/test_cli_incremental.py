@@ -17,11 +17,7 @@ def test_cli_scan_since_option(tmp_path: Path) -> None:
     # Initial commit
     app_py = tmp_path / "app.py"
     app_py.write_text(
-        "def helper():\n"
-        "    assert True\n"
-        "\n"
-        "def main():\n"
-        "    return helper()\n",
+        "def helper():\n    assert True\n\ndef main():\n    return helper()\n",
         encoding="utf-8",
     )
     repo.index.add(["app.py"])
@@ -30,8 +26,7 @@ def test_cli_scan_since_option(tmp_path: Path) -> None:
     # Commit 2: Add extra.py
     extra_py = tmp_path / "extra.py"
     extra_py.write_text(
-        "def extra():\n"
-        "    return 123\n",
+        "def extra():\n    return 123\n",
         encoding="utf-8",
     )
     repo.index.add(["extra.py"])

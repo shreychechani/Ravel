@@ -31,14 +31,12 @@ def test_incremental_workflow_end_to_end(tmp_path: Path) -> None:
     )
     service_py = tmp_path / "service.py"
     service_py.write_text(
-        "def vulnerable_sink():\n"
-        "    assert False, 'vulnerability trigger'\n",
+        "def vulnerable_sink():\n    assert False, 'vulnerability trigger'\n",
         encoding="utf-8",
     )
     helper_py = tmp_path / "helper.py"
     helper_py.write_text(
-        "def untouched_helper():\n"
-        "    assert False, 'isolated helper assert'\n",
+        "def untouched_helper():\n    assert False, 'isolated helper assert'\n",
         encoding="utf-8",
     )
     (tmp_path / "__init__.py").touch()
@@ -59,9 +57,7 @@ def test_incremental_workflow_end_to_end(tmp_path: Path) -> None:
     # Commit 2: Modify service.py without touching helper.py
     # helper.py finding MUST be reused
     service_py.write_text(
-        "# Added comment\n"
-        "def vulnerable_sink():\n"
-        "    assert False, 'vulnerability trigger'\n",
+        "# Added comment\ndef vulnerable_sink():\n    assert False, 'vulnerability trigger'\n",
         encoding="utf-8",
     )
     repo.index.add(["service.py"])

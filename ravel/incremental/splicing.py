@@ -81,9 +81,7 @@ def splice_graph(
         ):
             continue
 
-        retained_edges.append(
-            Edge(src_id=src, dst_id=dst, kind=edge.kind, resolved=edge.resolved)
-        )
+        retained_edges.append(Edge(src_id=src, dst_id=dst, kind=edge.kind, resolved=edge.resolved))
 
     # 3. Retain external refs and entry points from untouched files
     dirty_files = {n.file_path for n in [*diff.modified_nodes, *diff.added_nodes]}
@@ -141,9 +139,8 @@ def splice_graph(
                 definition = _target(script, site, source.rel_path, root)
                 if definition is None or definition.type != "class":
                     continue
-            src_node = (
-                _enclosing(local, site.line, {NodeKind.FUNCTION})
-                or file_nodes.get(source.rel_path)
+            src_node = _enclosing(local, site.line, {NodeKind.FUNCTION}) or file_nodes.get(
+                source.rel_path
             )
             if src_node is None:
                 continue
