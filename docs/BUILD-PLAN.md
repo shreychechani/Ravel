@@ -29,7 +29,7 @@ Legend: ✅ done · 🚧 partial / in progress · ⬜ not started.
 | 2 — Scanners + eval | ✅ | Bandit, Semgrep (local rules), OSV-Scanner (offline DB) and **gitleaks** (default rules, `--redact`) all wrapped; **eval harness** `uv run python -m eval.run` (pinned repos + venvs, keep-all / severity / random-N / Ravel / Ravel+triage, precision next to recall) |
 | 3 — Reachability | ✅ **checkpoint PASSED** | reachable / unknown / unreachable + path + blast radius; ranking. Pooled over vulpy-bad + flaskr: precision 11.7% → 100% (**×8.57**, gate ×3), recall retained **100%** (gate 85%), end-to-end recall 55.6%. Caveats: 2 repos; vulpy labels written after seeing output — **needs an independent re-check**; PyGoat scanned but not yet labelled |
 | 4 — Triage + ranking | ✅ built · ❌ **triage checkpoint FAILED** | context assembly, CWE prompts, content-hash verdict cache, token budget + kill switch; **bottom-up summaries** (`ravel summarize`). With llama3.2 3B, triage dropped one real SQLi (read `'%s' %` as a parameterised query): recall retained 100% → 80%, no precision gain → **ships disabled** (`--no-triage` default). Retest with a stronger model |
-| 5 — Interface + deps + incremental | 🚧 | **web view done** (`ravel serve`: ranked findings, traced paths, AI verdicts). **Deps report done** (`ravel deps`, web *Dependencies* tab): advisories + deprecated APIs per package, urgency by reachability. Incremental re-index: not started |
+| 5 — Interface + deps + incremental | ✅ done | **web view done** (`ravel serve`: ranked findings, traced paths, AI verdicts). **Deps report done** (`ravel deps`, web *Dependencies* tab): advisories + deprecated APIs per package, urgency by reachability. **Incremental re-index done** (`ravel scan --since <ref>`): git-diff → AST content-hash comparison → rename detection → selective graph splicing → path invalidation |
 
 Per-phase markers below carry the detail.
 
@@ -136,7 +136,7 @@ This is where Ravel beats Arcflow.
 
 ---
 
-## Phase 5 — Interface + deps + incremental — 🚧 web view + deps report done
+## Phase 5 — Interface + deps + incremental — ✅ done
 
 - Output: CLI + JSON, then single-page web view (Next.js + react-flow + **dagre**, not d3-force) showing traced paths.
 - ✅ Deps report (`ravel deps PATH`, the `dependencies` key of the scan JSON — report v3 — and the web view's *Dependencies* tab): one entry per package, classified by reachability. Built 2026-11-03.
@@ -146,7 +146,7 @@ This is where Ravel beats Arcflow.
   - **Limits reported, not hidden:** how many resolved external calls were checked, how many had no source, and the unresolved call sites the check can't see; stdlib deprecations are judged against the Python running Ravel. A deprecation done through a module `__getattr__` (Flask's `flask.Markup`) is not seen.
   - Fixture: `eval/fixtures/legacy_shop` (planted, ground truth in its README) — `utcnow()` reachable via `POST /orders`, `locale.getdefaultlocale()` in an offline script, Flask/Werkzeug 2.2.2 pinned. Real-code check: OWASP PyGoat's `views.py` → `datetime.utcnow` (×2) and Pillow's `ImageMath.eval`.
   - **Reachability fix found on the way (§6):** a dependency advisory is anchored on the files importing the package, and nothing calls a file, so on `django_app` with no venv all 38 Django advisories were *unreachable* — although the routes call Django through calls that simply couldn't be resolved. Now an imported package is **unknown** when route-reachable code in an importing file makes unresolved calls; only a resolved call earns *reachable*. Module-level scanner findings are unchanged; eval unchanged (×8.57, recall retained 100%).
-- Incremental (§8): git-diff → content-hash caching → **rename detection by content hash** → invalidate findings whose stored path contains a dirty node.
+- ✅ **Incremental re-index** (`ravel/incremental/`, `ravel scan --since <ref>`): git-diff → content-hash caching → **rename detection by content hash** → selective graph splicing → path invalidation when dirty nodes or incoming edges affect previous paths.
 
 **Reference (view taxonomy only, we don't port the JS):** `reference/Arcflow/js/renderers/*` and `js/components/*` show the graph-view vocabulary; ours is react-flow + dagre.
 
