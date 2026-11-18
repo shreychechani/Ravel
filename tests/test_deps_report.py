@@ -7,6 +7,7 @@ osv-scanner output), so these tests need no database.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -150,7 +151,8 @@ def test_deprecation_check_reports_what_it_could_not_see() -> None:
     payload = deps_payload(build_deps_report(scan_repo(DJANGO, scanners=[])))
     check = payload["deprecation_check"]
     assert check["unresolved_calls"] > 0  # no env: calls into Django are invisible
-    assert check["stdlib_python"] == "3.12"
+    # Stdlib deprecations are judged against the Python running Ravel.
+    assert check["stdlib_python"] == f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 @pytest.fixture(scope="module")
