@@ -1,7 +1,7 @@
 """Discover Python source files in a repository.
 
-File-type filtering is informed by reference/Arcflow/js/analysis/parser-core.js
-(codeExts / skip lists), ported and trimmed to Python-only for v1.
+File-type filtering uses an extension list and a skip list of vendored /
+generated directories, trimmed to Python-only for v1.
 """
 
 from __future__ import annotations

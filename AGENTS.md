@@ -14,8 +14,7 @@ If you are an agent starting a session on this repo, read this whole file first.
 
 1. [`PRODUCT.md`](PRODUCT.md) — the single source of truth. What Ravel is, the data model (§4), the non-negotiables (§6), scope (§7), incremental logic (§8), build order (§10).
 2. [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) — the phased plan and current phase.
-3. [`docs/reference/veloce-reuse-map.md`](docs/reference/veloce-reuse-map.md) — what to port / reference / drop from the vendored code.
-4. This file.
+3. This file.
 
 If a decision isn't covered by these, **ask a human — do not assume.** Several
 choices in PRODUCT.md look arbitrary but aren't.
@@ -39,14 +38,14 @@ Do not relitigate these in code or review unless a human explicitly reopens them
 
 ## 3. Reference-code policy (`reference/`)
 
-`reference/Arcflow/` and `reference/CodeClean/` are owner-approved, vendored,
-**read-only** copies. They are gitignored and are **not part of the build.**
+`reference/` holds owner-approved, vendored, **read-only** copies of other
+codebases. They are gitignored and are **not part of the build.**
 
 - **Never edit, run, import, or ship** anything under `reference/`.
 - It is **JavaScript / browser / regex-heuristic**. You **port logic to Python**; you do not translate line-for-line.
-- **Do NOT carry over their two weak parts:** (a) regex/substring security detection (`parser-security.js`) — we use real scanners; (b) name+import heuristic call resolution (`parser-callgraph.js`, `graph-builder.js`) — we resolve with Jedi/`ast`. Copying these imports the exact false-positive noise Ravel exists to kill.
-- **Do port** the tedious domain knowledge: framework route patterns, dependency-file parsing, OSV plumbing, secret taxonomies, framework entry-point exclusion lists, the provenance-as-metric idea. See the reuse map for the per-file verdict.
-- When you port something, **cite the source file** in the code comment and PR description, e.g. `# ported from reference/Arcflow/js/analysis/parser-routes.js`.
+- **Do NOT carry over their two weak parts:** (a) regex/substring security detection — we use real scanners; (b) name+import heuristic call resolution — we resolve with Jedi/`ast`. Copying these imports the exact false-positive noise Ravel exists to kill.
+- **Do port** the tedious domain knowledge: framework route patterns, dependency-file parsing, OSV plumbing, secret taxonomies, framework entry-point exclusion lists, the provenance-as-metric idea.
+- When you port something, cite the source file in the PR description. Do not name the reference projects in code, comments or docs; they are credited once, at the end of the README.
 
 ---
 

@@ -1,8 +1,6 @@
 """Parse Python source into function/class nodes with tree-sitter.
 
-Confirmed viable by reference/Arcflow/js/analysis/parser-findcalls.js, which
-already drives Python via tree-sitter. Here we use it as the primary (not
-fallback) parser, since v1 is Python-only.
+tree-sitter is the primary (not fallback) parser, since v1 is Python-only.
 """
 
 from __future__ import annotations

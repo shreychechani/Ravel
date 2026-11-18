@@ -63,7 +63,7 @@ inventing a score.
 
 | Spec | Link | Ravel use |
 |---|---|---|
-| **SARIF 2.1.0** (OASIS) | https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html ⚠ | Export format. Put `static_evidence.path` in `codeFlows` / `threadFlows` so GitHub code scanning and VS Code SARIF viewers render the traced path natively. Put reachability class and verdict in `properties`. Arcflow already exports SARIF (BUILD-PLAN reference index) |
+| **SARIF 2.1.0** (OASIS) | https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html ⚠ | Export format. Put `static_evidence.path` in `codeFlows` / `threadFlows` so GitHub code scanning and VS Code SARIF viewers render the traced path natively. Put reachability class and verdict in `properties` |
 | **OSV schema** | https://ossf.github.io/osv-schema/ ⚠ | Advisory format from OSV-Scanner. Check `affected[].ecosystem_specific` / `database_specific` for symbol info ([03](03-reachability-and-dependencies.md) Part B) |
 | **CycloneDX** (SBOM + VEX) | https://cyclonedx.org/ ⚠ | Its **VEX** (Vulnerability Exploitability eXchange) has a standard field for "not affected: vulnerable code not reachable" (`code_not_reachable` justification ⚠). Emitting VEX from Ravel's reachability is a standards-compliant way to publish "this CVE doesn't affect us" |
 | **OpenVEX** | https://github.com/openvex/spec ⚠ | Lighter VEX alternative with the same justification semantics (`vulnerable_code_not_in_execute_path` ⚠) |

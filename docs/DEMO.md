@@ -52,7 +52,7 @@ Open http://127.0.0.1:8765, then:
    the code panel highlights the SQL line.
 3. Click **backup** (unreachable): "No call path leads here from any of the
    4 untrusted entry points". It is still listed, just ranked lower.
-4. Open the **Code graph** tab, laid out like Arcflow: folders as coloured
+4. Open the **Code graph** tab: folders as coloured
    hulls, functions as circles. Dashed rings are web entry points, red rings are
    reachable warnings. Switch **Color by → Risk** to light up the attack
    surface, pick **Files graph** at the top for the file-level view, and click a

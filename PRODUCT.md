@@ -70,7 +70,7 @@ OUTPUT           ranked findings · traced paths · CLI / JSON / web
 1. **Reachability — deterministic, no LLM.** Cuts ~200 → ~20 by tracing whether untrusted input can reach the flagged code. Reproducible and cheap. This is the core contribution.
 2. **LLM triage — on the survivors only.** A verdict (real / false-positive / needs-review) plus reasoning, as structured JSON, cached and budget-capped.
 
-Handing raw scanner output straight to the LLM is the anti-pattern we reject: expensive, slow, and it rates noise as confidently as signal. And triage must **earn its slot** — if it doesn't beat reachability-alone on the eval harness, ship it disabled (§10). The reference tools (Arcflow/CodeClean) have neither layer: their detection is pure regex, reported flat. Both layers here are Ravel's contribution.
+Handing raw scanner output straight to the LLM is the anti-pattern we reject: expensive, slow, and it rates noise as confidently as signal. And triage must **earn its slot** — if it doesn't beat reachability-alone on the eval harness, ship it disabled (§10). Both layers are Ravel's contribution.
 
 ---
 
@@ -256,7 +256,7 @@ eval/
   truth/              ground-truth vulnerability files               [Phase 2]
   run.py              reproducible from one command                  [Phase 2]
 web/                  Next.js frontend                               [Phase 5]
-docs/                 ROADMAP, BUILD-PLAN, reference/ (reuse map)
+docs/                 ROADMAP, BUILD-PLAN, BENCHMARK, DEMO
 ```
 
 Root files: `pyproject.toml` (uv), `uv.lock`, `AGENTS.md`, `CLAUDE.md`,
@@ -273,36 +273,3 @@ Three contributors. Suggested ownership:
 - **LLM & interface** — summarization, triage, CLI/web output, eval harness.
 
 The eval harness is owned by someone who is *not* building triage.
-
----
-
-## 13. Reference projects (Veloce-AI, owner-approved to reuse)
-
-Two related, owner-approved codebases. **We have full source access and reuse their code directly** — porting the useful logic into Ravel's Python/server-side stack, not just studying patterns. **Both are browser-based, multi-language JavaScript analyzers**, so "reuse" means **porting JS → Python**, and it is *one-directional*: we lift the tedious, correct-enough domain knowledge (framework route patterns, dependency-file parsing, OSV plumbing, secret taxonomies, framework entry-point exclusion lists) and rebuild the two load-bearing parts — **call-graph resolution** and **detection** — the Ravel way. Carrying their regex detector or their name-heuristic call graph directly would import the exact false-positive noise Ravel exists to kill.
-
-> Both repos are vendored (read-only, gitignored) at [`reference/`](../reference/). A full component-by-component reuse map — what to **port**, **reference**, or **drop** — lives at [`docs/reference/veloce-reuse-map.md`](reference/veloce-reuse-map.md). Read that before porting anything.
->
-> **Note:** CodeClean reuses Arcflow's parser (its own `parser-*.js` are stubs), so Arcflow is the primary engine. Arcflow already uses tree-sitter for Python call detection — the same grammar family Ravel plans on.
-
-### Arcflow — `github.com/Veloce-AI/Arcflow`
-Browser-based VAPT / architecture-intelligence platform. Zero-install, offline-first, code never leaves the browser.
-- **What to borrow:**
-  - Call-graph and dependency extraction approach.
-  - **OSV.dev integration** for CVE/dependency scanning — directly relevant to our OSV-Scanner + deps work.
-  - **SARIF 2.1.0** and **CycloneDX SBOM** export formats — good targets for our JSON/report output.
-  - Entry-point / API-route mapping and component-hierarchy extraction.
-  - Security detections structured around OWASP Top 10, secrets (entropy-based), injection patterns — useful for how we normalize findings.
-  - Graph visualization patterns (their views are D3-based; ours is react-flow + dagre, but the view taxonomy is informative).
-- **Where it differs from Ravel:** multi-language via Acorn/web-tree-sitter; pure client-side (React + D3, no backend); it *detects*, but has no reachability-based triage or LLM verdict layer.
-
-### CodeClean — `github.com/Veloce-AI/CodeClean`
-Browser-based code-quality analyzer, ~20 analysis categories (dead code, circular deps, complexity, security, performance, coverage gaps, etc.). Runs locally; scans folder, ZIP, or public GitHub repo.
-- **What to borrow:**
-  - **Analyzer-module structure** — one module per check under `js/analysis/`. Maps cleanly onto our `/scanners` and `/deps` normalization design.
-  - **Dead-code and circular-dependency detection** logic — relevant to our graph + dependency analysis (and to the rename trap in §8).
-  - Multi-format export (JSON, HTML, SARIF, PDF) and the **cleanliness-score (0–100)** presentation idea.
-  - "AI-ready prompt" generation that structures issues by priority tier — informative for how we assemble LLM triage context.
-  - Rescan / improvement tracking — aligns with our incremental-update model.
-- **Where it differs from Ravel:** multi-language, vanilla-JS, no backend/DB, no LLM triage, and no reachability filtering — findings are reported flat, which is exactly the noise problem Ravel exists to fix.
-
-**Net:** these two prove the ingestion/scanning/visualization surface. Ravel's novel contribution — **reachability-based triage that filters findings by whether untrusted input can actually reach them** — is absent from both. That layer is our product.

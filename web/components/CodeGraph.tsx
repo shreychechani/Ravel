@@ -1,6 +1,6 @@
 "use client";
 
-// The code knowledge graph, laid out like Arcflow (sidebar · canvas with
+// The code knowledge graph (sidebar · canvas with
 // folder hulls · tabbed right panel · status bar), carrying Ravel's evidence:
 // which nodes are untrusted entry points, which hold warnings, and what an
 // attacker can reach.

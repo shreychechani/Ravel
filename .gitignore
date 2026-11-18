@@ -40,7 +40,7 @@ pnpm-debug.log*
 /cache/
 *.log
 
-# ---- Reference codebases (Veloce-AI Arcflow/CodeClean — read-only, not part of build) ----
+# ---- Vendored reference code (read-only, not part of build) ----
 /reference/
 
 # ---- Local scratch (browser automation artifacts, ad-hoc screenshots) ----

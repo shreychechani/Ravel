@@ -1,8 +1,8 @@
 """Resolve call sites into a call graph — the Phase 1 quality bar.
 
 tree-sitter finds *every* call site; Jedi resolves each callee to a real
-definition with scope awareness. This replaces Arcflow's name+import heuristic
-(BUILD-PLAN §1) — the biggest accuracy gap in that engine.
+definition with scope awareness, never a name+import heuristic (BUILD-PLAN §1),
+which is too imprecise for reachability.
 
 A call site is **resolved** if Jedi can say what it refers to: an internal
 function/class (→ a ``calls`` edge), or a third-party / stdlib symbol

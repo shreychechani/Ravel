@@ -1,5 +1,4 @@
-// The code graph as Arcflow draws it (view taxonomy only — reference/Arcflow's
-// renderer-d3.js), rebuilt for Ravel: circles grouped into hulls, pulled toward
+// The code graph: circles grouped into hulls, pulled toward
 // a centre per group. PRODUCT.md §5 rules out d3-force because a live
 // simulation jitters between renders, so the simulation is run to a fixed
 // number of ticks once, from deterministic start positions (d3-force's own RNG
@@ -25,7 +24,7 @@ export interface VNode extends SimulationNodeDatum {
   id: string;
   name: string;
   label: string;
-  group: string; // the folder: one hull per folder, as in Arcflow
+  group: string; // the folder: one hull per folder
   kind: string;
   file: string;
   line: number;

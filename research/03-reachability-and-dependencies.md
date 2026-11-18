@@ -90,7 +90,7 @@ Function-level dependency reachability needs "which function in package X is vul
 - **Verified:** ✅
 - **What:** `.pysa` model files declare taint **sources** (e.g. `django.http.request.HttpRequest.GET: TaintSource[UserControlled]`) and sinks. The repo ships `django_sources_sinks.pysa`, `flask_sources_sinks.pysa` and stubs under `stubs/taint/…` and `stubs/third_party_taint/…`. **Model generators** auto-create models, for example marking all Django view parameters as user-controlled.
 - **Ravel takeaway:**
-  - Pysa's **source** models are a curated list of "where untrusted input enters" per framework. That's knowledge for **entry-point detection** (`ravel/graph/entrypoints.py`), not a detection rule. Use it as a cross-reference to check Ravel's Flask/Django/FastAPI entry-point coverage, the same way BUILD-PLAN uses Arcflow's taxonomy.
+  - Pysa's **source** models are a curated list of "where untrusted input enters" per framework. That's knowledge for **entry-point detection** (`ravel/graph/entrypoints.py`), not a detection rule. Use it as a cross-reference to check Ravel's Flask/Django/FastAPI entry-point coverage.
   - Pysa's *sink* models and rules are **detection**. Do not port them (PRODUCT.md §6 "never write custom detection rules").
   - Pysa itself could be a **5th scanner** wrapped in Phase 2, but it needs a full Pyre type-check setup. Probably not v1.
 - **Lands in:** Phase 1 entry-point cross-check; Phase 2 optional scanner.

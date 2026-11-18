@@ -1,12 +1,11 @@
 """Detect HTTP-route entry points — where untrusted input enters the graph.
 
 Reachability (Phase 3) traces a finding back to an **untrusted** entry point;
-this module is what marks those entry points. We port the framework route
-knowledge from ``reference/Arcflow/js/analysis/parser-routes.js`` (its Python
-FastAPI/Flask patterns) but replace its line-by-line regex with tree-sitter:
-we look at the *decorator* on each function definition, so ``@app.get("/x")`` /
-``@router.post(...)`` / ``@bp.route(..., methods=[...])`` are matched
-structurally rather than by string shape.
+this module is what marks those entry points. Framework routes are found
+with tree-sitter rather than line-by-line regex: we look at the *decorator*
+on each function definition, so ``@app.get("/x")`` / ``@router.post(...)``
+/ ``@bp.route(..., methods=[...])`` are matched structurally rather than by
+string shape.
 
 **Trust classification.** Every HTTP route is ``untrusted``: it accepts input
 from outside the system. We deliberately do *not* port the reference's

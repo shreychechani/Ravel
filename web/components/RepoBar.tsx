@@ -14,7 +14,7 @@ const EXAMPLES: { label: string; target: string; ref?: string; note: string }[] 
   { label: "Flask tutorial", target: "eval/fixtures/flaskr", note: "no known bugs · local" },
 ];
 
-/** Where the user says what to scan: a git URL or a local folder, like Arcflow's URL bar. */
+/** Where the user says what to scan: a git URL or a local folder. */
 export function RepoBar({
   initial,
   busy,

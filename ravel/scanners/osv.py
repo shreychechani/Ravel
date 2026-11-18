@@ -15,11 +15,9 @@ machine (PRODUCT.md §6, local-first). Instead:
   downloads behind the user's back, and never silently skips.
 
 OSV groups aliases of one bug (CVE / GHSA / PYSEC ids) itself; each group is
-one finding. Severity bands and the "fixed in" suggestion are ported from
-``reference/Arcflow/js/analysis/osv-scan.js`` (``osvGetSeverity``) and
-``reference/CodeClean/js/analysis/dep-scan.js`` (``getUpgradeSuggestion``),
-fixed to read only real version ranges — Arcflow also took git commit hashes
-as "fixed versions".
+one finding. Severity bands come from the CVSS base score; the "fixed in"
+suggestion reads only real version ranges, never GIT ranges, whose events are
+commit hashes rather than versions.
 """
 
 from __future__ import annotations
@@ -102,7 +100,7 @@ def update_db(db_dir: Path, binary: Path | None = None) -> dt.date:
 
 
 def severity_from_score(score: str | None) -> Severity:
-    """CVSS base score → band (Arcflow ``osvGetSeverity``); unscored → LOW."""
+    """CVSS base score → band; unscored → LOW."""
     try:
         value = float(score) if score else 0.0
     except ValueError:

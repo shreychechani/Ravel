@@ -10,7 +10,7 @@ could actually reach — each explained in plain words, with the attack path dra
 out. Runs locally, nothing uploaded.
 
 **Scope decision:** v1 is **Python only** — on purpose. Supporting many languages
-(like the Arcflow reference tool) means a shallow, guess-based map in every
+means a shallow, guess-based map in every
 language. Getting the *reachability* answer right needs language-specific
 precision, so we go deep in one language first. The architecture stays
 language-agnostic, so more languages are a later add-on, not a rewrite.
